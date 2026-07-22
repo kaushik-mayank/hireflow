@@ -4,8 +4,84 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Phase 6 complete → awaiting go-ahead for Phase 7 (Bug bash & final QA)
+**Current phase:** 🏁 **Phases 0–7 complete.** Outstanding items are listed under "Handover" below.
 **Last updated:** 2026-07-23
+
+---
+
+## Session 9 — 2026-07-23 — Phase 7: Bug bash & final QA
+
+### Backend bugs fixed
+
+| Bug | Impact |
+|---|---|
+| **`ai_service` crashed the entire API on startup** | `os.environ["GROQ_API_KEY"]` raised at import; `server.py` imports `routes_ai`, so one unconfigured integration took down **every endpoint**. Key now read lazily; `GROK_API_KEY` accepted as an alias with a warning naming the Groq/x.ai trap; an x.ai model id in `AI_MODEL` is called out at boot; AI endpoints return a clean **503** instead of a 500. |
+| **CORS `"*"` + `allow_credentials=True`** | A combination browsers reject outright. Worked only because `CORS_ORIGINS` happened to be set. Credentials now enabled only with explicit origins. |
+| **`seed_if_empty()` ungated** | Now respects `SEED_ON_STARTUP`. **Default unchanged**, so behaviour is identical today; set it false to guarantee demo data can never touch production. ← *the guard you asked about* |
+| **`@app.on_event("startup")`** | Deprecated → `lifespan` handler. |
+| **`update_job` dropped falsy values** | A field could never be cleared back to empty — `""` and `None` both looked like "not supplied". Now `exclude_unset`, plus a status whitelist instead of accepting any string. |
+| **Unvalidated AI output written to Mongo** | `matched_skills`/`missing_skills`/`red_flags` were stored exactly as the model returned them, so a bare string or list of objects rendered as `[object Object]` or crashed `.map()`. Now coerced; scores clamped 0–100. |
+| **`requirements.txt`** | Same block listed 2–3×, plus 10 unimported packages. Deduped and pruned — **pandas, numpy and boto3 dominated install time on every deploy**. Dev tooling removed from the production install. |
+
+⚠️ **`cryptography` was deliberately KEPT** despite zero direct imports — PyJWT needs it for the RS256 Firebase verification. A naive prune would have broken sign-in. Commented in the file so nobody removes it later. **`reportlab` added** — the tests import it and it was missing.
+
+### Frontend bugs fixed
+- **`ErrorBoundary` at the root** — any thrown render error previously unmounted the whole tree, leaving a white page with no way back.
+- **`Modal` locks body scroll**, and declares `role="dialog"` / `aria-modal`.
+- Removed unused params (`Layout`'s `fullWidth`, `_ai_usage_summary`'s `total`).
+
+### Final QA — what I could verify
+| Check | Result |
+|---|---|
+| Demo account still works directly | ✅ Both accounts still seeded |
+| Demo credentials exposed anywhere public | ✅ **Zero** in Login, Signup, marketing pages or shared components |
+| Design consistency across new pages | ✅ The only hex values in every Phase 1–5 page are `#92400e`, `#f59e0b`, `#e5e7eb`, `#4f6ef7` — **all four existing design tokens.** No off-palette colour introduced |
+| Offline test suite | ✅ 172 passing |
+| Production build | ✅ `CI=true` clean, `main.js` 108.95 kB |
+
+### ⚠️ Final QA — what I could NOT verify
+**The full click-through QA in the brief was not performed.** No browser is available in this environment, and the backend was never started (no local dependencies; deliberately not booted against production Atlas). So across the whole engagement:
+
+- **Nothing has been opened in a browser.** No page has been visually confirmed, at any viewport.
+- **No backend endpoint has ever served a request.** Every route is syntax-checked and its logic unit-tested, but never executed.
+- **No Firebase flow has run** — sign-up, sign-in and password reset are untested code.
+- **No email has been sent** — SMTP is unconfigured locally.
+- **No AI call has been made** — no working Groq key, so the Phase 4 prompt outputs remain ungenerated.
+
+Everything is verified as far as static analysis, unit tests and a clean production build can take it. **That is not the same as working.** The handover list below is ordered accordingly.
+
+---
+
+## 🏁 Handover
+
+### Do these first — nothing works in production without them
+1. **Render backend env:** `FIREBASE_PROJECT_ID`, `ADMIN_EMAILS` (**the admin panel is unreachable until this is set** — the git-ignored credentials file does not exist on Render), and the `SMTP_*` group for feedback delivery. All documented in `backend/.env.example`.
+2. **Render frontend env:** confirm `REACT_APP_FIREBASE_*` are set **before** the build — CRA inlines them at build time.
+3. **Firebase console:** enable Email/Password sign-in, add your Render domain to Authorised domains, review the verification and reset email templates.
+4. **Edit `backend/admin.credentials.json`** — currently points at `admin@hireflow.com`, whose password was publicly known from the old login page. Put your own email in.
+5. **Run the click-through QA** listed above. Assume nothing is proven.
+
+### Generate the Phase 4 evidence
+```
+cd backend && set GROQ_API_KEY=gsk_... && python tests/prompt_samples.py > ../prompt-samples.md
+```
+
+### Awaiting your decision
+- **Delete the orphaned `components/ui/` (~40 shadcn files), `hooks/use-toast.js`, `constants/testIds/`, and the unused in-app `pages/ComingSoon.jsx`** — all verified unreferenced. *Will not shrink the bundle* (unreachable modules are never bundled); repo hygiene only.
+- **Prune ~17 unused npm dependencies.** Same caveat — install speed, not runtime.
+- **`/uploads` is an unauthenticated static mount** serving resume PDFs. Nothing links to it and filenames are unguessable UUIDs, but it is a path to candidate PII with no auth check. Removing it costs nothing functionally — say the word.
+- **Replace placeholder copy**: About, Careers, Pricing, testimonials, and the four `@example.com` addresses.
+- **Legal review of the privacy policy** — and confirm the §7 sub-processor list matches what you actually deploy.
+
+### What I'd tackle next (beyond this engagement)
+1. **Turn the Phase 1 "Coming Soon" items into real features** — bulk email and calendar scheduling are the two that would most change daily use.
+2. **Move resume PDFs to object storage** (S3/GCS/GridFS). They currently sit on ephemeral disk and are never read back, which also blocks the PDF-viewer feature already on your backlog.
+3. **Rotate the Atlas password and `JWT_SECRET`.** You declined this and that is your call, but they sat in plaintext in a folder that has been zipped and passed around. Recorded as accepted risk.
+4. **Replace the admin panel's in-memory aggregation with MongoDB aggregation pipelines** — `_enrich_users` and `/admin/analytics` pull every record into Python. Fine now, won't scale.
+5. **Add a real integration test suite.** `tests/backend_test.py` and `tests/test_admin_reports.py` hardcode `/app/frontend/.env`, a container path from the original scaffold, and fail at collection. Pre-existing, untouched.
+6. **Profile and memoise the Kanban board** — carried from Phase 6; needs a browser profile to do correctly rather than speculatively.
+7. **Cache AI ranking against a JD content hash** so an unchanged posting never pays for a re-run.
+8. **Email verification enforcement** — Firebase sends the email but nothing currently gates on `email_verified`.
 
 ---
 
