@@ -24,6 +24,21 @@ export const STAGE_COLORS = {
   "On Hold": { bg: "#ffedd5", color: "#7c2d12" },
 };
 
+/** Quick picks for the upload source field. Free text is allowed — these are
+ *  only suggestions, and are deliberately broad rather than office-centric. */
+export const SOURCE_SUGGESTIONS = [
+  "Job board",
+  "Careers page",
+  "Referral",
+  "Agency",
+  "Recruiter outreach",
+  "Walk-in",
+  "Social media",
+  "Job centre",
+  "Notice board",
+  "Returning applicant",
+];
+
 export function scoreColor(score) {
   if (score == null) return { bg: "#f3f4f6", color: "#9ca3af" };
   if (score >= 75) return { bg: "#dcfce7", color: "#16a34a" };

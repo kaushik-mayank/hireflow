@@ -3,7 +3,7 @@ import re
 import uuid
 import io
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pypdf import PdfReader
 
 from database import jobs, candidates, stage_transitions, UPLOAD_DIR
@@ -17,6 +17,11 @@ STAGES = [
     "Interview Scheduled", "Interview Done", "Selected", "Rejected", "On Hold",
 ]
 HIRED_STAGE = "Selected"
+
+# Where a candidate came from. Free text so any channel works — job boards,
+# agencies, referrals, walk-ins, notice boards, WhatsApp groups — but the UI
+# offers these as quick picks. Reports group by whatever value is stored.
+UNKNOWN_SOURCE = "Unknown"
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 PHONE_RE = re.compile(r"(\+?\d[\d\s().-]{7,}\d)")
@@ -54,6 +59,7 @@ def guess_name(text: str, filename: str) -> str:
 async def upload_resumes(
     job_id: str,
     files: list[UploadFile] = File(...),
+    source: str = Form(UNKNOWN_SOURCE),
     user: dict = Depends(get_current_user),
 ):
     job = await jobs.find_one({"id": job_id, "user_id": user["id"]}, {"_id": 0})
@@ -85,6 +91,7 @@ async def upload_resumes(
             "resume_text": text or "(Could not extract text from PDF)",
             "pdf_path": stored_name,
             "pdf_original_name": f.filename,
+            "source": (source or "").strip() or UNKNOWN_SOURCE,
             "stage": "Applied",
             "ai_score": None,
             "ai_summary": None,

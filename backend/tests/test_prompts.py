@@ -46,15 +46,18 @@ def ai():
 
     os.environ.setdefault("GROQ_API_KEY", "test-key-not-used")
 
-    if "groq" not in sys.modules:
-        groq_stub = types.ModuleType("groq")
-        groq_stub.AsyncGroq = lambda **kwargs: None
-        sys.modules["groq"] = groq_stub
+    # Merge into any stub another test module already installed rather than
+    # skipping when the name exists — otherwise whichever suite runs first
+    # decides which attributes are available to the rest.
+    def stub(name, **attrs):
+        module = sys.modules.get(name) or types.ModuleType(name)
+        for key, value in attrs.items():
+            if not hasattr(module, key):
+                setattr(module, key, value)
+        sys.modules[name] = module
 
-    if "database" not in sys.modules:
-        database_stub = types.ModuleType("database")
-        database_stub.ai_usage_log = None
-        sys.modules["database"] = database_stub
+    stub("groq", AsyncGroq=lambda **kwargs: None)
+    stub("database", ai_usage_log=None)
 
     import ai_service
     return ai_service

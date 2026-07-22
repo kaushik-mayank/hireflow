@@ -4,7 +4,7 @@ import { ArrowLeft, Upload, Sparkles, LayoutGrid, FileText, Activity, Search, Tr
 import { jobsApi, candidatesApi, aiApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Skeleton, EmptyState, Spinner } from "@/components/ui";
-import { STAGES, fmtDate } from "@/constants";
+import { STAGES, fmtDate, SOURCE_SUGGESTIONS } from "@/constants";
 import { toast } from "sonner";
 
 export default function JobDetail() {
@@ -15,6 +15,7 @@ export default function JobDetail() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("candidates");
   const [uploading, setUploading] = useState(false);
+  const [source, setSource] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [activity, setActivity] = useState([]);
@@ -56,6 +57,8 @@ export default function JobDetail() {
     }
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));
+    // Captured at upload so Reports can show which channels actually convert.
+    fd.append("source", source);
     setUploading(true);
     try {
       const r = await candidatesApi.upload(id, fd);
@@ -147,6 +150,27 @@ export default function JobDetail() {
             {uploading ? <Spinner size={22} className="mx-auto text-indigo" /> : <Upload size={22} className="mx-auto text-gray-400" />}
             <p className="text-sm text-gray-700 mt-2 font-medium">{uploading ? "Uploading..." : "Drop PDF resumes here or click to browse"}</p>
             <p className="text-xs text-gray-400 mt-1">Multiple PDFs · max 5MB each</p>
+          </div>
+
+          {/* Applied to everything uploaded in this batch, so Reports can show
+              which channels actually convert. Free text — any channel works. */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <label htmlFor="upload-source" className="text-xs font-medium text-gray-700">
+              Where did these candidates come from?
+            </label>
+            <input
+              id="upload-source"
+              list="source-suggestions"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              placeholder="Unknown"
+              className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-indigo focus:ring-2 focus:ring-indigo/20"
+              data-testid="upload-source"
+            />
+            <datalist id="source-suggestions">
+              {SOURCE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
+            </datalist>
+            <span className="text-xs text-gray-400">Optional — powers source reporting</span>
           </div>
         </Card>
 

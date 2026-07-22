@@ -173,6 +173,9 @@ def _candidate_samples(job1: str, job2: str, job3: str) -> list:
     ]
 
 
+_SEED_SOURCES = ["Job board", "Referral", "Agency", "Careers page", "Walk-in"]
+
+
 def _build_candidate_record(sample: tuple) -> tuple[dict, dict | None]:
     """Build a candidate doc (and optional transition doc) from a sample tuple."""
     (job, name, email, phone, profile, skills, experience, education,
@@ -181,6 +184,9 @@ def _build_candidate_record(sample: tuple) -> tuple[dict, dict | None]:
     analyzed = score is not None
     cand = {
         "id": cid, "job_id": job, "name": name, "email": email, "phone": phone,
+        # Rotated across channels so source-effectiveness reporting has something
+        # to show in the demo. Real uploads capture this at upload time.
+        "source": _SEED_SOURCES[hash(cid) % len(_SEED_SOURCES)],
         "resume_text": SAMPLE_RESUME.format(
             name=name, email=email, phone=phone,
             summary=profile, skills=skills, experience=experience, education=education,
