@@ -109,7 +109,11 @@ async def draft_email(body: EmailRequest, user: dict = Depends(get_current_user)
     cand, job = await _get_owned_candidate(body.candidate_id, user)
     raw = await ai.call_ai(
         ai.EMAIL_SYSTEM,
-        ai.build_email_prompt(body.email_type, cand, job["title"], user.get("company")),
+        # The JD is passed so the draft can match the register of the actual role
+        # rather than defaulting to a single corporate tone.
+        ai.build_email_prompt(
+            body.email_type, cand, job["title"], user.get("company"), job.get("jd_text", "")
+        ),
     )
     parsed = ai.parse_ai_json(raw)
     if not isinstance(parsed, dict):
