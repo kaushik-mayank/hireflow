@@ -4,8 +4,82 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Phase 1 complete → awaiting go-ahead for Phase 2 (Auth overhaul)
+**Current phase:** Phase 2 complete → awaiting go-ahead for Phase 3 (Support/feedback loop)
 **Last updated:** 2026-07-23
+
+---
+
+## Session 4 — 2026-07-23 — Phase 2: Auth overhaul, role lockdown, hardcoded admin
+
+### Commits
+| Hash | What |
+|---|---|
+| `0c5c4ed` | privilege-escalation fix + admin allowlist + Firebase token verifier |
+| *(next)* | Firebase sign-in bridged to JWT, demo de-exposure, admin panel work |
+
+---
+
+### 🔒 The critical bug is closed
+
+All three escalation paths shut:
+| File | Was | Now |
+|---|---|---|
+| `models.py` | `SignupRequest.role` accepted from the client | field **removed entirely** |
+| `routes_auth.py:28` | `role = body.role if body.role in ("hr","admin")` | constant `HR_ROLE`, never client input |
+| `Signup.jsx` | **"Admin" option in a public dropdown** | role selector removed |
+| `routes_admin.py` | `PUT /users/{id}/role` let any admin mint another | returns 403 with an explanation |
+
+**Admin is now decided only by `backend/admin_identity.py`**, which matches the *authenticated* identity against an allowlist held outside the users collection. `require_admin` and `create_token` both consult it, so a row claiming `role="admin"` — **including one created through the old bug** — gets nothing.
+
+Sources, merged:
+1. `backend/admin.credentials.json` — git-ignored (template committed as `admin.credentials.example.json`)
+2. `ADMIN_EMAILS` / `ADMIN_FIREBASE_UIDS` env vars
+
+> **Deviation from the brief, with reason:** the brief specified a git-ignored file only. A git-ignored file **does not exist on Render** — it was never pushed — so the admin panel would be permanently unreachable in production. The env-var fallback is required for the hosted product to work. Both sources are backend-only and never reach the browser.
+
+**Fails closed:** no configuration means nobody is an admin.
+
+### 🧪 23 regression tests — `backend/tests/test_admin_identity.py`, all passing
+Covers the escalation scenario itself, case/whitespace normalisation, prefix/suffix near-miss attacks (`xowner@…`, `owner@….evil.com`), null/empty identities, unedited example placeholders, malformed and non-object config files, the fail-closed path, and env-var merging.
+
+### 🔑 Firebase — bridged, exactly as decided
+Firebase owns credentials, verification and password resets. It does **not** own sessions: the frontend exchanges the Firebase ID token at `POST /auth/firebase` for the app's **existing JWT**, so `AuthContext`, the axios interceptor and every guard are untouched. **Existing users keep their passwords — no forced reset.**
+
+**No Firebase service-account key is needed.** `backend/firebase_auth.py` verifies ID tokens directly against Google's public JWKS (RS256, checking `aud`/`iss`/`exp`/`sub`) using `pyjwt` + `cryptography`, both already dependencies. The only new backend config is **`FIREBASE_PROJECT_ID`, which is not a secret**. This deliberately avoids `firebase-admin` and the credential provisioning it would require.
+
+**Graceful degradation:** when the Firebase env vars are absent the app falls back to the legacy password endpoints and Forgot Password explains resets are unavailable. This is what allows local development without a Firebase project.
+
+**Login flow:** Firebase first; if Firebase has no such account, fall back to the legacy password endpoint. That is what keeps pre-Firebase users *and the demo accounts* working.
+
+### 🚨 Demo credentials removed from the login page
+`Login.jsx` was printing **working credentials for both the HR and the admin account in plain text on the public login page**. That card is gone. The seeded accounts still work for anyone who knows the details, per the brief.
+
+**Verified:** zero occurrences of `Admin@1234`, `Sarah@1234`, `"Demo accounts"` or `admin@hireflow.com` across **every** built bundle.
+
+### Admin panel
+- Sidebar **Admin badge** + purple-accented "Platform Admin" section — visually distinct, never confused with an HR dashboard. *(Purple, not amber — amber means "AI" in this design system.)*
+- User management: explanatory banner, role-toggle removed, allowlisted admins cannot be deactivated.
+- **Fixed a real bug:** resume rows linked to `/candidates/:id`, which **403s for an admin who doesn't own that candidate** — broken for its actual purpose. Now opens a JSON viewer of the stored record via the new `GET /admin/resumes/{id}`.
+- Added open/closed job counts and a 30-day signup series to `/admin/dashboard`.
+
+### 📊 Bundle
+| Asset | Before | After |
+|---|---|---|
+| `main.js` gzip | 237.85 kB | **238.64 kB** (+0.79 kB) |
+| Firebase auth SDK | — | own **26.17 kB** deferred chunk |
+
+Auth pages are lazy-loaded, so the SDK never enters the dashboard bundle. **Verified: `identitytoolkit` appears 0 times in `main.js`.**
+
+### Verified
+- `CI=true yarn build` compiles clean (warnings-as-errors).
+- 23/23 backend allowlist tests pass.
+- All six modified backend files byte-compile (`py_compile`).
+- Credential files confirmed untracked; only the `.example` templates are staged.
+
+### ⚠️ Not verified — read this
+- **The FastAPI app was never started.** Backend dependencies (`fastapi`, `motor`) are not installed locally, and I deliberately **did not** boot the API against your production Atlas — `seed_if_empty()` runs on startup and would touch live data. So `/auth/firebase` has been syntax-checked and reasoned through, but **not executed**.
+- **Firebase sign-in has never run.** No Firebase project config is available locally, so every Firebase path fell back to legacy. The whole Firebase flow is unexercised.
+- **No browser check** — same as Phase 1.
 
 ---
 

@@ -63,7 +63,19 @@ Commits `dc828fb`, `b682b78`, `ab61af7`. Only pre-existing file touched: `App.js
 
 ---
 
-## Phase 2 — Auth Overhaul: Firebase, Role Lockdown, Hardcoded Admin ⬜ NOT STARTED
+## Phase 2 — Auth Overhaul: Firebase, Role Lockdown, Hardcoded Admin ✅ COMPLETE (2026-07-23)
+
+Commits `0c5c4ed` + follow-up. All items below done except where noted.
+
+**Still needs you (see PROGRESS.md Session 4):**
+- Set `FIREBASE_PROJECT_ID` on the Render **backend** service (not a secret, but required for `/auth/firebase` to work).
+- Set `ADMIN_EMAILS` on the Render **backend** service — the git-ignored credentials file does not exist there, so **the admin panel is unreachable in production until this is set**.
+- Confirm `REACT_APP_FIREBASE_*` are set on the Render **frontend** service *before* the build — CRA inlines them at build time.
+- Firebase console: enable Email/Password sign-in, add your Render domain to Authorised domains, review the verification and password-reset email templates.
+- Edit `backend/admin.credentials.json` — it currently points at `admin@hireflow.com` so the panel keeps working; that password is publicly known from the old login page.
+- **Nothing Firebase-related has been executed.** Test sign-up, sign-in and password reset end to end.
+
+
 
 - [x] **Migration strategy decided: Firebase-signin bridged to the existing JWT.** Firebase owns credentials, signup, verification and password reset. On successful Firebase sign-in the frontend exchanges the Firebase ID token at a new backend endpoint, which verifies it, looks up/creates the matching `users` record, and returns **the app's existing JWT** — so `AuthContext`, the axios interceptor, `get_current_user` and every existing route keep working unchanged. Existing users are **not** forced to reset passwords.
   - [ ] Add `firebase-admin` to `requirements.txt` (absent today) to verify Firebase ID tokens server-side
