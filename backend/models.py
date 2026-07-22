@@ -88,3 +88,14 @@ class CompareRequest(BaseModel):
 
 class SummaryRequest(BaseModel):
     candidate_id: str
+
+
+# ---------- Feedback ----------
+class FeedbackRequest(BaseModel):
+    type: str  # "review" | "bug" | "feature"
+    subject: str = Field(min_length=1, max_length=200)
+    message: str = Field(min_length=1, max_length=5000)
+
+
+class FeedbackStatusUpdate(BaseModel):
+    status: str  # "new" | "read" | "actioned"

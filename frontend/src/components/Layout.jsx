@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Briefcase, BarChart3, Users, FileText, Activity, DollarSign, LogOut, Hexagon, Shield } from "lucide-react";
+import { LayoutDashboard, Briefcase, BarChart3, Users, FileText, Activity, DollarSign, LogOut, Hexagon, Shield, MessageSquare } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Avatar } from "@/components/ui";
 
@@ -51,6 +51,11 @@ export function Sidebar() {
           <BarChart3 size={17} /> Reports
         </NavLink>
 
+        <div className="text-[10px] uppercase tracking-wider text-white/25 px-5 py-2 mt-4">Support</div>
+        <NavLink to="/feedback" className={navItem} data-testid="nav-feedback">
+          <MessageSquare size={17} /> Send Feedback
+        </NavLink>
+
         {isAdmin && (
           <>
             <div className="mt-5 mx-2 border-t border-purple/25" />
@@ -71,6 +76,9 @@ export function Sidebar() {
             </NavLink>
             <NavLink to="/admin/ai-usage" className={navItem} data-testid="nav-admin-ai">
               <DollarSign size={17} /> AI Usage & Cost
+            </NavLink>
+            <NavLink to="/admin/feedback" className={navItem} data-testid="nav-admin-feedback">
+              <MessageSquare size={17} /> Feedback & Support
             </NavLink>
           </>
         )}

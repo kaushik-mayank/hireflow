@@ -10,11 +10,13 @@ import JobDetail from "@/pages/JobDetail";
 import CandidateBoard from "@/pages/CandidateBoard";
 import CandidateDetail from "@/pages/CandidateDetail";
 import Reports from "@/pages/Reports";
+import Feedback from "@/pages/Feedback";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminUsers from "@/pages/admin/AdminUsers";
 import AdminResumes from "@/pages/admin/AdminResumes";
 import AdminAnalytics from "@/pages/admin/AdminAnalytics";
 import AdminAIUsage from "@/pages/admin/AdminAIUsage";
+import AdminFeedback from "@/pages/admin/AdminFeedback";
 
 /* Auth pages are lazy-loaded so the Firebase SDK — which only they use — stays
    out of the authenticated app's bundle. */
@@ -91,12 +93,14 @@ function AppRoutes() {
       <Route path="/jobs/:id/board" element={<PrivateRoute><CandidateBoard /></PrivateRoute>} />
       <Route path="/candidates/:id" element={<PrivateRoute><CandidateDetail /></PrivateRoute>} />
       <Route path="/reports" element={<PrivateRoute><Reports /></PrivateRoute>} />
+      <Route path="/feedback" element={<PrivateRoute><Feedback /></PrivateRoute>} />
 
       <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
       <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
       <Route path="/admin/resumes" element={<AdminRoute><AdminResumes /></AdminRoute>} />
       <Route path="/admin/analytics" element={<AdminRoute><AdminAnalytics /></AdminRoute>} />
       <Route path="/admin/ai-usage" element={<AdminRoute><AdminAIUsage /></AdminRoute>} />
+      <Route path="/admin/feedback" element={<AdminRoute><AdminFeedback /></AdminRoute>} />
     </Routes>
   );
 }

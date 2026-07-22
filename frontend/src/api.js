@@ -94,4 +94,17 @@ export const reportsApi = {
   get: () => client.get("/reports"),
 };
 
+// ---- Feedback / Support ----
+export const feedbackApi = {
+  submit: (data) => client.post("/feedback", data),
+  mine: () => client.get("/feedback/mine"),
+  adminList: (params = {}) => {
+    const q = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")
+    ).toString();
+    return client.get(`/feedback/admin${q ? `?${q}` : ""}`);
+  },
+  setStatus: (id, status) => client.put(`/feedback/admin/${id}/status`, { status }),
+};
+
 export default client;
