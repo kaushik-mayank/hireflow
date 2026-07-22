@@ -114,7 +114,7 @@ export function Topbar({ title, subtitle, actions }) {
   );
 }
 
-export default function Layout({ children, fullWidth = false }) {
+export default function Layout({ children }) {
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar />

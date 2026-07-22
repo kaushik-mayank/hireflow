@@ -1,19 +1,63 @@
 import os
 import re
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from groq import AsyncGroq
 from database import ai_usage_log
 
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+logger = logging.getLogger(__name__)
+
+# GROQ (GroqCloud) and GROK (x.ai) are different companies. The committed .env
+# used the latter spelling, so `os.environ["GROQ_API_KEY"]` raised KeyError at
+# import time — and because server.py imports routes_ai, that killed the entire
+# API on startup rather than just the AI endpoints. The misspelling is accepted
+# as an alias with a warning, and a missing key no longer prevents boot.
+GROQ_API_KEY = (
+    os.environ.get("GROQ_API_KEY") or os.environ.get("GROK_API_KEY") or ""
+).strip()
+
+if not os.environ.get("GROQ_API_KEY") and os.environ.get("GROK_API_KEY"):
+    logger.warning(
+        "Using GROK_API_KEY. The correct name is GROQ_API_KEY (GroqCloud, not x.ai) — "
+        "please rename it."
+    )
+
 AI_MODEL = os.environ.get("AI_MODEL", "llama-3.3-70b-versatile")
 
-_ai_client = AsyncGroq(api_key=GROQ_API_KEY)
+# x.ai model ids will not resolve against GroqCloud and produce a confusing
+# upstream 404, so say so plainly at boot instead.
+if AI_MODEL.startswith("grok"):
+    logger.warning(
+        "AI_MODEL is set to %r, which is an x.ai model id. This backend talks to "
+        "GroqCloud — expect model-not-found errors. Try llama-3.3-70b-versatile.",
+        AI_MODEL,
+    )
+
+if not GROQ_API_KEY:
+    logger.warning(
+        "No Groq API key configured. The app will run, but every AI feature will "
+        "return a clear error until GROQ_API_KEY is set."
+    )
+
+_ai_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+
+class AIUnavailable(Exception):
+    """Raised when an AI feature is used but the provider is not configured."""
+
+
+def is_configured() -> bool:
+    return _ai_client is not None
 
 
 async def call_ai(system_message: str, prompt: str) -> str:
+    if not is_configured():
+        raise AIUnavailable(
+            "AI features are not configured on this server. Set GROQ_API_KEY to enable them."
+        )
     response = await _ai_client.chat.completions.create(
         model=AI_MODEL,
         max_tokens=4096,

@@ -259,7 +259,7 @@ async def admin_analytics(admin: dict = Depends(require_admin)) -> dict:
     }
 
 
-async def _ai_usage_summary(total: int, user_map: dict) -> dict:
+async def _ai_usage_summary(user_map: dict) -> dict:
     month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     all_logs = await ai_usage_log.find({}, {"_id": 0, "action": 1, "user_id": 1, "created_at": 1}).to_list(100000)
     epoch = datetime.min.replace(tzinfo=timezone.utc)
@@ -302,5 +302,5 @@ async def admin_ai_usage(
         "page": page,
         "page_size": page_size,
         "items": items,
-        "summary": await _ai_usage_summary(total, user_map),
+        "summary": await _ai_usage_summary(user_map),
     }

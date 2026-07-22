@@ -1,41 +1,53 @@
+# HireFlow backend dependencies.
+#
+# This file previously contained the same block twice (fastapi, uvicorn,
+# pymongo, motor, bcrypt and others were each listed two or three times) plus a
+# number of packages nothing imported. Deduplicated, and grouped so it is clear
+# why each entry is here.
+
+# --- Web framework ---
 fastapi==0.110.1
 uvicorn==0.25.0
-boto3>=1.34.129
-requests-oauthlib>=2.0.0
-cryptography>=42.0.8
-python-dotenv>=1.0.1
+python-multipart>=0.0.9      # multipart/form-data for resume uploads
+
+# --- Database ---
 pymongo==4.5.0
+motor==3.3.1                 # async MongoDB driver
+
+# --- Models / validation ---
 pydantic>=2.6.4
-email-validator>=2.2.0
-pyjwt>=2.10.1
-bcrypt==4.1.3
-passlib>=1.7.4
-tzdata>=2024.2
-motor==3.3.1
-pytest>=8.0.0
-black>=24.1.1
-isort>=5.13.2
-flake8>=7.0.0
-mypy>=1.8.0
-python-jose>=3.3.0
-requests>=2.31.0
-pandas>=2.2.0
-numpy>=1.26.0
-python-multipart>=0.0.9
-jq>=1.6.0
-typer>=0.9.0
-pypdf>=6.0.0
-fastapi==0.110.1
-uvicorn==0.25.0
+email-validator>=2.2.0       # required by pydantic's EmailStr
+
+# --- Auth ---
+pyjwt>=2.10.1                # app JWTs, and Firebase ID token verification
+cryptography>=42.0.8         # REQUIRED: PyJWT needs it for the RS256 verification
+                             # in firebase_auth.py. Not imported directly — do
+                             # not remove because a grep finds no usage.
+bcrypt==4.1.3                # legacy password hashing
+
+# --- Config ---
 python-dotenv>=1.0.1
-pymongo==4.5.0
-motor==3.3.1
-pydantic>=2.6.4
-email-validator>=2.2.0
-pyjwt>=2.10.1
-bcrypt==4.1.3
-python-multipart>=0.0.9
-pypdf>=6.0.0
-openai>=1.50.0
-requests>=2.31.0
+
+# --- Documents ---
+pypdf>=6.0.0                 # resume text extraction
+
+# --- AI ---
 groq>=0.9.0
+
+# --- Tests ---
+pytest>=8.0.0
+requests>=2.31.0             # used by the HTTP integration tests
+reportlab>=4.0.0             # test fixtures generate sample PDFs
+
+# ---------------------------------------------------------------------------
+# Removed 2026-07-23 — verified as imported nowhere in backend/:
+#   boto3, requests-oauthlib, pandas, numpy, jq, typer, python-jose, passlib,
+#   openai, tzdata
+# pandas, numpy and boto3 alone accounted for most of the install time on every
+# deploy. Restore any of them here if a future feature needs one.
+#
+# Also removed: black, isort, flake8, mypy. These are developer tooling, not
+# runtime dependencies, and were being installed on every production deploy.
+# Install them locally with:
+#   pip install black isort flake8 mypy
+# ---------------------------------------------------------------------------

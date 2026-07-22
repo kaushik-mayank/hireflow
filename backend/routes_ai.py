@@ -17,13 +17,37 @@ def _chunk(lst, n):
         yield lst[i:i + n]
 
 
+def _as_str_list(value) -> list:
+    """Coerce a model-supplied field to a list of strings.
+
+    The AI returns free-form JSON, so these fields can arrive as a bare string,
+    null, or a list of objects. Writing that straight to Mongo makes the UI
+    render "[object Object]" or crash on .map(), so it is normalised here.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if v is not None and str(v).strip()]
+    return [str(value)]
+
+
+def _as_score(value) -> int:
+    try:
+        return max(0, min(100, int(float(value))))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _build_rank_set_doc(result: dict, current_stage: str, now: str) -> dict:
+    summary = result.get("summary")
     set_doc = {
-        "ai_score": int(result.get("score", 0)),
-        "ai_summary": result.get("summary"),
-        "matched_skills": result.get("matched_skills", []),
-        "missing_skills": result.get("missing_skills", []),
-        "red_flags": result.get("red_flags", []),
+        "ai_score": _as_score(result.get("score")),
+        "ai_summary": summary if isinstance(summary, str) else None,
+        "matched_skills": _as_str_list(result.get("matched_skills")),
+        "missing_skills": _as_str_list(result.get("missing_skills")),
+        "red_flags": _as_str_list(result.get("red_flags")),
         "analyzed_at": now,
     }
     if current_stage == "Applied":

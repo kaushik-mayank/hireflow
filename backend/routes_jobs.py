@@ -89,12 +89,26 @@ async def get_job(job_id: str, user: dict = Depends(get_current_user)):
     return await _job_stats(job)
 
 
+VALID_STATUSES = ("active", "paused", "closed")
+
+
 @router.put("/{job_id}")
 async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_current_user)):
     job = await jobs.find_one({"id": job_id, "user_id": user["id"]}, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+
+    # `exclude_unset` rather than dropping falsy values: the old filter meant a
+    # field could never be cleared back to empty, because "" and None both
+    # looked like "not supplied".
+    updates = body.model_dump(exclude_unset=True)
+    if "status" in updates and updates["status"] not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Status must be one of: {', '.join(VALID_STATUSES)}",
+        )
+    if "openings_needed" in updates and updates["openings_needed"] is not None and updates["openings_needed"] < 1:
+        raise HTTPException(status_code=400, detail="Openings must be at least 1")
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     await jobs.update_one({"id": job_id}, {"$set": updates})
     job.update(updates)

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Spinner } from "@/components/ui";
+import ErrorBoundary from "@/components/ErrorBoundary";
 /* Dashboard stays eager: it is where every sign-in lands, so deferring it
    would only trade bundle size for a spinner on the most common path. */
 import Dashboard from "@/pages/Dashboard";
@@ -119,13 +120,15 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Suspense fallback={<FullScreenLoader />}>
-          <AppRoutes />
-        </Suspense>
-        <Toaster position="bottom-right" richColors closeButton />
-      </BrowserRouter>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <Suspense fallback={<FullScreenLoader />}>
+            <AppRoutes />
+          </Suspense>
+          <Toaster position="bottom-right" richColors closeButton />
+        </BrowserRouter>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

@@ -108,9 +108,19 @@ export function Modal({ open, onClose, title, children, width = "max-w-2xl", foo
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // Lock the page behind the overlay. Without this the background scrolls
+  // under the modal, which is disorienting on desktop and makes the dialog
+  // hard to keep in view on mobile.
+  useEffect(() => {
+    if (!open) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, [open]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-navy/40 backdrop-blur-sm animate-fade-in" onClick={onClose} />
       <div
         className={`relative bg-white rounded-2xl shadow-lift w-full ${width} max-h-[88vh] flex flex-col animate-fade-in`}
