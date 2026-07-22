@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 
 from database import users, jobs, candidates, ai_usage_log, login_activity
 from auth import require_admin
+from admin_identity import effective_role, is_admin_identity
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -55,6 +56,9 @@ async def _enrich_users() -> list:
         u["jobs_count"] = jobs_count.get(u["id"], 0)
         u["resumes_count"] = resumes_count.get(u["id"], 0)
         u["ai_calls"] = ai_count.get(u["id"], 0)
+        # Report the role the system will actually enforce, not the stored
+        # field — otherwise the admin UI would show stale or escalated values.
+        u["role"] = effective_role(u)
     return all_users
 
 
@@ -67,8 +71,10 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
         if u.get("role") == "hr" and (_parse(u.get("last_login_at")) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff
     )
     total_jobs = await jobs.count_documents({})
+    open_jobs = await jobs.count_documents({"status": "active"})
     total_resumes = await candidates.count_documents({})
     total_ai = await ai_usage_log.count_documents({})
+    signups_series = _daily_series([u.get("created_at") for u in enriched], 30)
 
     # recent logins
     logins = await login_activity.find({}, {"_id": 0}).sort("created_at", -1).to_list(50)
@@ -89,9 +95,12 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
             "total_users": len(enriched),
             "active_hr": active_hr,
             "total_jobs": total_jobs,
+            "open_jobs": open_jobs,
+            "closed_jobs": max(total_jobs - open_jobs, 0),
             "total_resumes": total_resumes,
             "total_ai_calls": total_ai,
         },
+        "signups": signups_series,
         "users": enriched,
         "recent_logins": recent_logins,
     }
@@ -109,19 +118,33 @@ async def set_user_status(user_id: str, body: StatusUpdate, admin: dict = Depend
         raise HTTPException(status_code=404, detail="User not found")
     if user_id == admin["id"] and not body.is_active:
         raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+    if is_admin_identity(target) and not body.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="This account is on the admin allowlist and cannot be deactivated here.",
+        )
     await users.update_one({"id": user_id}, {"$set": {"is_active": 1 if body.is_active else 0}})
     return {"success": True, "is_active": body.is_active}
 
 
 @router.put("/users/{user_id}/role")
 async def set_user_role(user_id: str, body: RoleUpdate, admin: dict = Depends(require_admin)):
-    if body.role not in ("hr", "admin"):
-        raise HTTPException(status_code=400, detail="Invalid role")
+    """Retained so existing clients get a clear answer instead of a 404.
+
+    Role can no longer be changed through the API. Admin is granted only by the
+    server-side allowlist in admin_identity.py — previously this endpoint was a
+    lateral-movement path that let any admin mint another one.
+    """
     target = await users.find_one({"id": user_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    await users.update_one({"id": user_id}, {"$set": {"role": body.role}})
-    return {"success": True, "role": body.role}
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Roles can no longer be changed here. Admin access is granted only by the "
+            "server-side admin allowlist (backend/admin.credentials.json or ADMIN_EMAILS)."
+        ),
+    )
 
 
 @router.get("/resumes")
@@ -155,6 +178,30 @@ async def admin_resumes(
             "file_name": c.get("pdf_original_name"),
         })
     return {"total": total, "page": page, "page_size": page_size, "items": items}
+
+
+@router.get("/resumes/{candidate_id}")
+async def admin_resume_detail(candidate_id: str, admin: dict = Depends(require_admin)):
+    """Full stored record for one candidate, for support and moderation.
+
+    Returns the raw document including extracted resume text and AI output, so
+    an admin can inspect exactly what is held about a candidate.
+    """
+    cand = await candidates.find_one({"id": candidate_id}, {"_id": 0})
+    if not cand:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    job = await jobs.find_one({"id": cand.get("job_id")}, {"_id": 0, "id": 1, "title": 1, "user_id": 1})
+    owner = None
+    if job:
+        owner = await users.find_one(
+            {"id": job.get("user_id")}, {"_id": 0, "id": 1, "name": 1, "email": 1}
+        )
+    return {
+        "candidate": cand,
+        "job": {"id": job.get("id"), "title": job.get("title")} if job else None,
+        "hr_user": owner,
+    }
 
 
 def _daily_series(timestamps: list, days: int) -> list:

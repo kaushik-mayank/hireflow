@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from database import users
+from admin_identity import effective_role, is_admin_identity
 
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGORITHM = "HS256"
@@ -29,7 +30,8 @@ def create_token(user: dict) -> str:
     payload = {
         "userId": user["id"],
         "email": user["email"],
-        "role": user["role"],
+        # Derived from the admin allowlist, never from the stored `role` field.
+        "role": effective_role(user),
         "name": user["name"],
         "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXP_DAYS),
     }
@@ -61,6 +63,12 @@ async def get_current_user(
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
+    """Gate every admin route.
+
+    Checks the authenticated identity against the admin allowlist rather than
+    the stored `role` field. A user row claiming role="admin" — including one
+    created through the old privilege-escalation bug — gets nothing here.
+    """
+    if not is_admin_identity(user):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user

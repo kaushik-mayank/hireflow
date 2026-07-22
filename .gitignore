@@ -34,6 +34,8 @@ dist
 
 *token.json*
 *credentials.json*
+# ...but the placeholder template must be committed so the pattern is documented.
+!*.credentials.example.json
 
 # Logs and debug files
 npm-debug.log*

@@ -8,12 +8,21 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     company: Optional[str] = None
-    role: str = "hr"
+    # NOTE: `role` is deliberately absent. It used to be accepted here, which
+    # let anyone register as an admin. Admin is decided server-side only, by
+    # admin_identity.py. Do not add it back.
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class FirebaseAuthRequest(BaseModel):
+    """Exchange a Firebase ID token for this app's own JWT."""
+    id_token: str
+    name: Optional[str] = None
+    company: Optional[str] = None
 
 
 # ---------- Jobs ----------
