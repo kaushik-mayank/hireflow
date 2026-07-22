@@ -4,8 +4,64 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Phase 2 complete → awaiting go-ahead for Phase 3 (Support/feedback loop)
+**Current phase:** Phase 3 complete → awaiting go-ahead for Phase 4 (Universal-niche AI prompt audit)
 **Last updated:** 2026-07-23
+
+---
+
+## Session 5 — 2026-07-23 — Phase 3: Support / feedback loop
+
+Users can send a **review, bug report or feature request** from inside the dashboard. Submissions reach **connecting800@gmail.com** and are persisted so the admin panel can work through them.
+
+### Owner constraints confirmed this session
+- ✅ Firebase env vars, Email/Password auth and `admin.credentials.json` — owner handling.
+  - *Clarified:* `admin.credentials.json` holds **emails and Firebase UIDs only — there is no password field.** Passwords live in Firebase or the legacy bcrypt store.
+- ✅ **Legacy JWT compatibility retained** — unchanged from Phase 2. `POST /auth/login` (bcrypt) still works, and Login falls back to it whenever Firebase has no matching account. Nothing about the existing JWT session model changed.
+- ✅ **`seed_if_empty()` never run against production Atlas.** The backend was not booted at all. ⚠️ *Note:* it still auto-runs on every startup ([server.py:104](backend/server.py#L104)); it no-ops only because `users` is non-empty. **Offered to put it behind an explicit opt-in flag — awaiting your call.** Logged in Backlog.
+
+### Delivery mechanism — and why
+**Plain SMTP via stdlib `smtplib`. Zero new dependencies.** Provider-agnostic: Gmail app password, Resend, Brevo, Mailgun and SES SMTP all work by changing env vars alone. Chosen over adding a SendGrid/SES SDK because there was **no email infrastructure at all** and the brief asked not to introduce heavy infra where something simpler fits.
+
+**Deliverability** (the brief's "don't trivially hit spam"):
+- `From` is **always the authorised SMTP sender, never the submitter** — putting a submitter's address in `From` fails SPF/DKIM and lands in spam or gets rejected outright.
+- The submitter goes in **`Reply-To`**, so hitting reply in the inbox still answers them.
+- Explicit `Date` and `Message-ID` headers — both are common spam signals when absent.
+
+**Never loses a message:** the submission is written to MongoDB **before** the send is attempted, and `send_email()` returns `False` rather than raising. If SMTP is unconfigured or the relay is down, the feedback is still captured, the admin list flags it as not emailed, and the user is told it was *received* rather than *sent*.
+
+### New files
+| File | Purpose |
+|---|---|
+| `backend/email_service.py` | SMTP transport, fails soft, blocking send pushed to a worker thread |
+| `backend/routes_feedback.py` | `POST /feedback`, `GET /feedback/mine`, `GET /feedback/admin`, `PUT /feedback/admin/{id}/status` |
+| `frontend/src/pages/Feedback.jsx` | Three-way type picker, char counters, and the user's own submission history |
+| `frontend/src/pages/admin/AdminFeedback.jsx` | Filterable list, unread highlighting, read/actioned workflow, mailto reply, SMTP-unconfigured warning |
+| `backend/.env.example` | **Every** backend variable documented |
+
+New routes: `/feedback` (all users, "Support" section in sidebar) and `/admin/feedback` (admin only).
+
+The **account email is attached automatically** — the user never types it. Rate limited to 15 submissions per user per hour.
+
+### Verified
+- **Email headers exercised directly**: `From` = authorised sender, `Reply-To` = submitter, `Date` and `Message-ID` present, and an unconfigured send returns `False` **without raising**.
+- `connecting800@gmail.com` is **absent from every client bundle** — it's a backend default, so the owner's inbox isn't exposed in public JS.
+- All backend files byte-compile; 23 admin allowlist tests still pass.
+- `CI=true yarn build` clean.
+
+### 📊 Bundle
+`main.js` 238.64 → **243.01 kB** gzip (+4.37 kB). Both new pages are eagerly imported, matching the existing admin pages — Phase 6 splits them all together.
+
+### ⚠️ Not verified
+- **The FastAPI app still has not been started** (backend deps absent locally; not booting against production Atlas). `POST /feedback` is syntax-checked and its email layer unit-exercised, but **the endpoint has never run**.
+- **No email has actually been sent.** SMTP is unconfigured locally, so the real send path is untested end to end.
+- No browser check.
+
+### What you need to set
+SMTP is **not configured**, so nothing will be emailed until you set these on the Render **backend** service (all documented in `backend/.env.example`):
+
+`SMTP_HOST` · `SMTP_PORT` · `SMTP_USER` · `SMTP_PASSWORD` · `SMTP_FROM` · optionally `SMTP_FROM_NAME`, `SMTP_USE_SSL`, `FEEDBACK_TO`
+
+Until then, feedback is still captured and visible at `/admin/feedback`, which shows a banner explaining delivery is off. For Gmail specifically you need an **App Password** (not your account password) with 2FA enabled.
 
 ---
 
@@ -308,7 +364,8 @@ Logged during Phase 0, deliberately **not** fixed (no unrelated refactors). Cand
 - `Layout({ fullWidth })` accepted but never used; `_ai_usage_summary(total, …)` param never used
 
 **Correctness / robustness**
-- **`<Route path="*">` → `/dashboard`** swallows all unknown routes — **must be restructured before Phase 1** or it eats every marketing route
+- **`seed_if_empty()` auto-runs on every backend startup** ([server.py:104](backend/server.py#L104)), gated only by `users` being non-empty. Owner asked that it never run against production Atlas — honoured, but nothing in code enforces it. **Offered to put it behind an explicit opt-in env flag; awaiting the call.**
+- ~~`<Route path="*">` → `/dashboard` swallows all unknown routes~~ — **fixed in Phase 1**
 - **CORS trap:** `allow_credentials=True` with `allow_origins` defaulting to `"*"` — browsers reject that combination outright; works now only because `CORS_ORIGINS` is set explicitly
 - `update_job` filters `if v is not None`, so a field can never be cleared; `status` accepts any arbitrary string
 - `_build_rank_set_doc` trusts the model's JSON shape — doesn't validate array-ness before writing to Mongo

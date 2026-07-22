@@ -112,17 +112,23 @@ Commits `0c5c4ed` + follow-up. All items below done except where noted.
 
 ---
 
-## Phase 3 — Support / Feedback Loop ⬜ NOT STARTED
+## Phase 3 — Support / Feedback Loop ✅ COMPLETE (2026-07-23)
 
 Target inbox: **connecting800@gmail.com**
 
-- [ ] In-dashboard entry point: "Send Feedback / Report an Issue / Suggest a Feature"
-- [ ] Form: type (review / bug / feature request), subject, message body, auto-attached account email
-- [ ] Delivery consistent with the existing stack — no heavy new email infra if a simpler option fits (note: **no email infrastructure exists today**; `boto3` is installed but unused)
-- [ ] Proper from/reply-to headers so it doesn't trivially hit spam
-- [ ] Success/failure toast (use `sonner`, the app's real toast system)
-- [ ] Persist submissions to the DB as well, so the Phase 2 admin panel can list them later
-- [ ] Update PROGRESS.md, summarise (any third-party credentials you must provision), **stop**
+- [x] In-dashboard entry point — `/feedback`, "Support" section in the sidebar
+- [x] Form: type (review / bug / feature request), subject, message body, **auto-attached account email**
+- [x] Delivery via stdlib `smtplib` — **zero new dependencies**, provider-agnostic
+- [x] `From` = authorised sender (SPF/DKIM safe), `Reply-To` = submitter, explicit `Date` + `Message-ID`
+- [x] Success/failure toast via `sonner`; distinguishes "received" from "sent" when SMTP is down
+- [x] Persisted to MongoDB **before** sending, so a mail failure never loses a message
+- [x] Admin listing at `/admin/feedback` with filters, read/actioned workflow and a mailto reply
+- [x] Rate limited to 15/user/hour
+- [x] Updated PROGRESS.md
+
+**Credentials you must provision** (Render backend service): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`. Gmail needs an **App Password** with 2FA on. Until set, feedback is captured but not emailed, and the admin page says so.
+
+**Not verified:** the endpoint has never run and no email has actually been sent.
 
 ---
 
