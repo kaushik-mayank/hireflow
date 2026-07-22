@@ -158,7 +158,24 @@ Source: AUDIT.md §3 (all 7 prompts quoted verbatim).
 
 ---
 
-## Phase 5 — Reports Page Overhaul ⬜ NOT STARTED
+## Phase 5 — Reports Page Overhaul ✅ COMPLETE (2026-07-23)
+
+Funnel with drop-off, time-to-hire + trend, source effectiveness, aging postings, open/closed over time, rule-based insights. `source` field added. Fabricated `est_completion` removed. N+1 fixed. 31 new tests.
+
+---
+
+## 🔑 Standing rule added 2026-07-23 — JD-driven AI, no hardcoded niches
+
+**Applies to all future work.** AI evaluation criteria must be **derived from the job description at runtime**, never from occupations, industries or categories written into the code.
+
+- Every evaluative prompt carries `JD_ANALYSIS_DIRECTIVE` (domain, function, seniority, engagement, hard requirements, tools, context) and judges against the profile it derives.
+- Screening-question `type` labels are free-form, in the role's own vocabulary — not a list.
+- Certifications, licences and tools are extracted dynamically, in any field.
+- Tenure is judged against derived engagement norms — a short stint means different things for a contractor than an executive.
+- **No prompt template or system message may name a specific occupation.** Enforced by tests.
+- The 3 original niches are regression fixtures only; 11 industries are exercised. **Adding an industry must never require a code change.**
+
+
 
 ⚠️ **Premise correction:** the current 4 graphs are **real data, not random placeholders** (AUDIT.md §4). This is an upgrade of working analytics. The only fake number is `est_completion` (hardcoded `now + 14 days × remaining`).
 

@@ -4,8 +4,64 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Phase 4 complete → awaiting go-ahead for Phase 5 (Reports overhaul)
+**Current phase:** Phase 5 complete → awaiting go-ahead for Phase 6 (Performance pass)
 **Last updated:** 2026-07-23
+
+---
+
+## Session 7 — 2026-07-23 — Prompt architecture correction + Phase 5
+
+### 🔧 Correction first: the prompts were overfit to the three test niches
+
+Owner pushed back, correctly. My Phase 4 rewrite wrote the three **validation** niches **into the production prompts** — the ranking prompt named *"ICU nurse, forklift operator, backend engineer"* and the questions prompt scripted what to ask a ward nurse vs a chef. That is illustration posing as architecture: it biases every evaluation toward the three examples I happened to pick and disadvantages roles resembling none of them.
+
+**Replaced with an explicit two-stage design.** Every evaluative prompt now carries `JD_ANALYSIS_DIRECTIVE`, which derives a role profile from the description **first** — domain, function, seniority, engagement type, hard requirements, tools/systems, working context — then judges against *that* profile.
+
+| Requirement | How it's met |
+|---|---|
+| Ranking driven by JD, not fixed categories | Scoring weights come from the derived profile; explicit "do not reward credentials the role did not ask for" |
+| Questions adapt to the role | `type` labels are **free-form**, derived from the role's own vocabulary — not chosen from any list |
+| Certifications/licences/tools extracted dynamically | `HARD REQUIREMENTS` and `TOOLS & SYSTEMS` are named profile dimensions, so they surface in any field |
+| Industry-aware tenure judgement | Tenure judged against **derived ENGAGEMENT norms**. Frequent moves carry no signal for contract/agency/locum/seasonal/project work, and may carry some where the description implies long-horizon ownership. **Reasoned, not an allowlist of exempt sectors.** |
+| No generic scoring template | `UNIVERSAL_CONTEXT` restated as a principle, not a sector list — a finite list silently excludes whatever it omits |
+
+**Tests: 26 → 118.** The three original niches stay as regression fixtures. **Eight further industries added** — finance, legal, sales, marketing, manufacturing, construction, hospitality, education — run against all five evaluative prompts. None needed bespoke handling; *if adding an industry ever required a code change, that would be the bug.*
+
+**New architectural guard:** no prompt template or system message may name a specific occupation. Whole-word matching, after a first attempt tripped on `"reward"` containing `"ward"`.
+
+---
+
+### Phase 5 — Reports overhaul
+
+The old four panels were real data, but only two were decision-useful and one number was invented.
+
+| Panel | What it does now |
+|---|---|
+| **Pipeline conversion funnel** | Per-stage counts, conversion rate and drop-off. Counts the **furthest stage each candidate reached**, not where they sit now — someone rejected after interview still counts at every stage they passed. Rejected/On Hold are outcomes, excluded from the progression. |
+| **Time-to-hire** | Per posting and overall, plus a 30-day trend split so the page says whether it's improving |
+| **Source effectiveness** | Now possible — `source` captured at upload |
+| **Postings needing attention** | Open, unfilled, no candidate movement in 14+ days, longest-idle first. *This is the list that says what to do next.* |
+| **Open vs closed postings** | 12-week area chart |
+| **Insights** | Plain-language, auto-generated |
+
+**`source` field added** (as you approved): free text with suggestions, so any channel works — job centre, notice board, walk-in, agency, not just office channels. Existing candidates group under `Unknown` rather than being dropped.
+
+**Insights are rule-based, not an AI call.** They render on every page load, so they must be instant, free and identical for identical data. Percentage claims are **suppressed below a five-candidate sample** rather than reporting "100% conversion" off a single hire. The on-demand AI pipeline-health report is untouched.
+
+**Removed the fabricated `est_completion`** — hardcoded as `now + 14 days × remaining`. It was the only invented number on the page.
+
+**Fixed an N+1 query** — time-to-hire ran one transitions lookup per hired candidate inside a loop. All transitions now fetched once.
+
+**Empty states at three levels:** no postings gets a first-run screen with a create action; each panel explains what would populate it; a failed fetch says so instead of rendering an empty axis.
+
+### Verified
+- **172 offline tests passing** (31 reports + 118 prompts + 23 admin), **and passing in reverse order** — which caught a real isolation bug I introduced: `test_reports` installed a `database` stub without `ai_usage_log`, and `test_prompts` then skipped creating its own. Stubs now merge instead of skipping.
+- Reports tests cover the edge cases that would otherwise produce nonsense: no data, unparseable and timezone-naive timestamps, division by zero, hires with no recorded transition, candidates predating the `source` field, and the funnel never widening.
+- `CI=true yarn build` clean. `main.js` 243.01 → **246.15 kB**. Still recharts only.
+
+### ⚠️ Not verified
+- **Backend still never started** — no deps locally, and not booting against production Atlas. All reports logic is unit-tested but the endpoint has never served a request.
+- No browser check of the new Reports page.
 
 ---
 
