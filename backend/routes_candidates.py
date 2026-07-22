@@ -169,19 +169,51 @@ async def update_stage(candidate_id: str, body: StageUpdate, user: dict = Depend
 
 @router.put("/bulk-stage")
 async def bulk_update_stage(body: BulkStageUpdate, user: dict = Depends(get_current_user)):
+    """Move many candidates at once.
+
+    Previously issued two queries per candidate id inside a loop, then one
+    update plus one transition insert each — moving 50 candidates cost over 200
+    round-trips. Now a fixed number of queries plus two bulk writes.
+    """
     if body.stage not in STAGES:
         raise HTTPException(status_code=400, detail="Invalid stage")
-    updated = 0
-    for cid in body.candidate_ids:
-        cand = await candidates.find_one({"id": cid}, {"_id": 0})
-        if not cand:
-            continue
-        job = await jobs.find_one({"id": cand["job_id"], "user_id": user["id"]})
-        if not job:
-            continue
-        await _move_stage(cand, body.stage, body.note, user)
-        updated += 1
-    return {"success": True, "updated": updated}
+    if not body.candidate_ids:
+        return {"success": True, "updated": 0}
+
+    cands = await candidates.find(
+        {"id": {"$in": body.candidate_ids}}, {"_id": 0}
+    ).to_list(len(body.candidate_ids))
+    if not cands:
+        return {"success": True, "updated": 0}
+
+    # One ownership check for all the jobs involved, rather than per candidate.
+    owned_job_ids = {
+        j["id"] for j in await jobs.find(
+            {"id": {"$in": list({c["job_id"] for c in cands})}, "user_id": user["id"]},
+            {"_id": 0, "id": 1},
+        ).to_list(1000)
+    }
+    movable = [c for c in cands if c.get("job_id") in owned_job_ids]
+    if not movable:
+        return {"success": True, "updated": 0}
+
+    now = datetime.now(timezone.utc).isoformat()
+    await candidates.update_many(
+        {"id": {"$in": [c["id"] for c in movable]}}, {"$set": {"stage": body.stage}}
+    )
+    await stage_transitions.insert_many([
+        {
+            "id": str(uuid.uuid4()),
+            "candidate_id": c["id"],
+            "from_stage": c.get("stage"),
+            "to_stage": body.stage,
+            "note": body.note,
+            "moved_by": user["name"],
+            "moved_at": now,
+        }
+        for c in movable
+    ])
+    return {"success": True, "updated": len(movable)}
 
 
 @router.post("/{candidate_id}/note")

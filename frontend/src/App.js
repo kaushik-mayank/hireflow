@@ -3,20 +3,32 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Spinner } from "@/components/ui";
+/* Dashboard stays eager: it is where every sign-in lands, so deferring it
+   would only trade bundle size for a spinner on the most common path. */
 import Dashboard from "@/pages/Dashboard";
-import Jobs from "@/pages/Jobs";
-import JobCreate from "@/pages/JobCreate";
-import JobDetail from "@/pages/JobDetail";
-import CandidateBoard from "@/pages/CandidateBoard";
-import CandidateDetail from "@/pages/CandidateDetail";
-import Reports from "@/pages/Reports";
-import Feedback from "@/pages/Feedback";
-import AdminDashboard from "@/pages/admin/AdminDashboard";
-import AdminUsers from "@/pages/admin/AdminUsers";
-import AdminResumes from "@/pages/admin/AdminResumes";
-import AdminAnalytics from "@/pages/admin/AdminAnalytics";
-import AdminAIUsage from "@/pages/admin/AdminAIUsage";
-import AdminFeedback from "@/pages/admin/AdminFeedback";
+
+/* Everything past the dashboard is deferred. Reports matters most here — it is
+   the only eagerly-loaded page that pulls in recharts, so leaving it in the
+   entry bundle meant every user downloaded the entire charting library on
+   sign-in whether or not they ever opened a chart. */
+const Jobs = lazy(() => import("@/pages/Jobs"));
+const JobCreate = lazy(() => import("@/pages/JobCreate"));
+const JobDetail = lazy(() => import("@/pages/JobDetail"));
+const CandidateBoard = lazy(() => import("@/pages/CandidateBoard"));
+const CandidateDetail = lazy(() => import("@/pages/CandidateDetail"));
+const Reports = lazy(() => import("@/pages/Reports"));
+
+/* The admin panel is reachable by exactly one account on the platform, so
+   every HR user was downloading six pages they can never open. Lazy-loaded. */
+const AdminDashboard = lazy(() => import("@/pages/admin/AdminDashboard"));
+const AdminUsers = lazy(() => import("@/pages/admin/AdminUsers"));
+const AdminResumes = lazy(() => import("@/pages/admin/AdminResumes"));
+const AdminAnalytics = lazy(() => import("@/pages/admin/AdminAnalytics"));
+const AdminAIUsage = lazy(() => import("@/pages/admin/AdminAIUsage"));
+const AdminFeedback = lazy(() => import("@/pages/admin/AdminFeedback"));
+
+/* Support pages are opened rarely and cost nothing to defer. */
+const Feedback = lazy(() => import("@/pages/Feedback"));
 
 /* Auth pages are lazy-loaded so the Firebase SDK — which only they use — stays
    out of the authenticated app's bundle. */

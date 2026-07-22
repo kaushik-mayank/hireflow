@@ -1,4 +1,6 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap");
+/* Fonts are loaded via <link> in public/index.html, not @import here — a CSS
+   @import blocks rendering and cannot start until this stylesheet has itself
+   downloaded, making the two requests serial. */
 
 @tailwind base;
 @tailwind components;

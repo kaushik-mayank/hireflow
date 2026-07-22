@@ -7,7 +7,15 @@
         <meta name="description" content="HireFlow — AI-Powered Hiring Platform for Modern HR Teams" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+        <!-- The app uses DM Sans (UI) and DM Mono (resume/JD text) per tailwind.config.js.
+             This previously loaded Inter, which nothing referenced, while the DM families
+             came in via an @import at the top of index.css — a render-blocking request that
+             CSS @import forces to be serial. Loading them here instead lets the browser
+             start the font fetch while the stylesheet is still downloading. -->
+        <link
+            href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap"
+            rel="stylesheet"
+        />
         <title>HireFlow | AI Hiring Platform</title>
         <script>
             window.addEventListener("error", function (e) {

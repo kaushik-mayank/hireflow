@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { authApi } from "@/api";
 import { firebaseSignOut } from "@/lib/firebase";
 
@@ -30,26 +30,30 @@ export function AuthProvider({ children }) {
     loadUser();
   }, [loadUser]);
 
-  const login = (tok, usr) => {
+  const login = useCallback((tok, usr) => {
     localStorage.setItem("hireflow_token", tok);
     setToken(tok);
     setUser(usr);
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem("hireflow_token");
     setToken(null);
     setUser(null);
     // Clear the Firebase session too, otherwise the browser stays signed in to
     // Firebase and the next sign-in silently reuses the old identity.
     firebaseSignOut();
-  };
+  }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
-      {children}
-    </AuthContext.Provider>
+  /* Memoised because this object is consumed by every screen in the app. As a
+     fresh literal it changed identity on each render of AuthProvider, forcing
+     every consumer to re-render even when nothing about the session moved. */
+  const value = useMemo(
+    () => ({ user, token, loading, login, logout }),
+    [user, token, loading, login, logout]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => useContext(AuthContext);

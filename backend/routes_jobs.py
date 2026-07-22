@@ -11,23 +11,48 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 HIRED_STAGE = "Selected"
 
 
-async def _job_stats(job: dict) -> dict:
-    cands = await candidates.find({"job_id": job["id"]}, {"_id": 0, "stage": 1, "ai_score": 1}).to_list(5000)
-    total = len(cands)
-    hired = len([c for c in cands if c.get("stage") == HIRED_STAGE])
-    in_pipeline = len([c for c in cands if c.get("stage") not in (HIRED_STAGE, "Rejected")])
-    job["candidate_count"] = total
-    job["hired_count"] = hired
-    job["in_pipeline_count"] = in_pipeline
+def _apply_counts(job: dict, counts: dict) -> dict:
+    stats = counts.get(job["id"], {})
+    job["candidate_count"] = stats.get("total", 0)
+    job["hired_count"] = stats.get("hired", 0)
+    job["in_pipeline_count"] = stats.get("in_pipeline", 0)
     return job
+
+
+async def _counts_for_jobs(job_ids: list) -> dict:
+    """Candidate counts for many jobs in ONE query, keyed by job id."""
+    if not job_ids:
+        return {}
+    counts: dict = {}
+    cursor = candidates.find(
+        {"job_id": {"$in": job_ids}}, {"_id": 0, "job_id": 1, "stage": 1}
+    )
+    async for c in cursor:
+        stats = counts.setdefault(c["job_id"], {"total": 0, "hired": 0, "in_pipeline": 0})
+        stats["total"] += 1
+        stage = c.get("stage")
+        if stage == HIRED_STAGE:
+            stats["hired"] += 1
+        elif stage != "Rejected":
+            stats["in_pipeline"] += 1
+    return counts
+
+
+async def _job_stats(job: dict) -> dict:
+    return _apply_counts(job, await _counts_for_jobs([job["id"]]))
 
 
 @router.get("")
 async def list_jobs(user: dict = Depends(get_current_user)):
+    """List postings with candidate counts.
+
+    This used to issue one candidates query per job inside a loop — a recruiter
+    with 30 postings triggered 31 round-trips on every page load. Now two
+    queries regardless of how many postings exist.
+    """
     docs = await jobs.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    for d in docs:
-        await _job_stats(d)
-    return docs
+    counts = await _counts_for_jobs([d["id"] for d in docs])
+    return [_apply_counts(d, counts) for d in docs]
 
 
 @router.post("")
