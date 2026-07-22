@@ -4,8 +4,58 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Phase 3 complete → awaiting go-ahead for Phase 4 (Universal-niche AI prompt audit)
+**Current phase:** Phase 4 complete → awaiting go-ahead for Phase 5 (Reports overhaul)
 **Last updated:** 2026-07-23
+
+---
+
+## Session 6 — 2026-07-23 — Phase 4: Universal-niche AI prompt audit
+
+All seven prompt templates rewritten. **Response schemas unchanged** — every JSON key the UI renders is identical, and 26 new tests assert it.
+
+### The four substantive fixes
+
+| Prompt | Was | Now |
+|---|---|---|
+| **Ranking** | `"expert technical recruiter"`; **`"job hopping"` in the stock red-flag list** | Occupation-neutral framing; explicit instruction **not** to penalise short tenures in agency, locum, seasonal, temporary, contract, hospitality, construction, events or gig work. Also told not to reward credentials the role never asked for. |
+| **Screening questions** | Closed enum: `Technical`/`Behavioral`/`Experience`/`Culture Fit` | Open, role-appropriate labels incl. Safety, Certification, Compliance, Availability, Physical Requirements, Practical Skills |
+| **JD enhancement** | Hardcoded white-collar section list | Menu spanning shift patterns, pay basis, site, certifications, physical requirements — include a section **only** where the input supports it |
+| **Emails** | Saw only a job title → one fixed register | Receives the **job description**; matches tone and length to role and reader; bracketed placeholders instead of invented times/rates/locations |
+
+`"job hopping"` was the worst offender — that single phrase systematically down-ranked blue-collar candidates for a career shape that is completely normal in their sector.
+
+Compare, summary and pipeline-health got the same universal framing via a shared `UNIVERSAL_CONTEXT` constant; summary also carries the tenure guard.
+
+### ✅ The question-enum concern from Phase 0 resolved — no schema change needed
+The audit flagged widening the `type` enum as "the one place a schema change may be genuinely necessary". **It isn't.** The UI renders `q.type` as **free text inside a `Pill`** ([CandidateDetail.jsx:140](frontend/src/pages/CandidateDetail.jsx#L140), [CandidateBoard.jsx:203](frontend/src/pages/CandidateBoard.jsx#L203)) — never switched on, mapped to a lookup, or filtered. The vocabulary widens; the schema shape `{type, question}` is untouched; no frontend change was required.
+
+### Demo seed data replaced
+It was two software/design roles with resumes reading *"TechCorp"* and *"B.S. Computer Science"* — the first thing a prospect sees. Now **three genuinely different postings**: ICU Registered Nurse, Forklift Operator (night shift), Backend Software Engineer, with eight realistic candidates. One forklift candidate deliberately has **three short agency placements** — the exact shape the old prompt flagged — so the fix is demonstrable in the demo itself.
+
+### Verified
+- **26 offline prompt tests + 23 admin allowlist tests = 49 passing.** The prompt suite stubs `groq` and `database`, so it runs with no backend dependencies at all.
+- Tests assert both directions: every schema key still requested, **and** the bias phrases are gone (`"job hopping"` absent, `"technical recruiter"` absent, old closed enum absent, white-collar-only section list absent).
+- Tests confirm the JD actually reaches every prompt that takes one, across all three sample roles.
+- `build_email_prompt` still works when a job has no description (`jd_text` optional).
+
+### ⚠️ Live sample outputs NOT produced — needs your key
+The brief asked for each rewritten prompt to be run against ≥3 very different postings with outputs pasted here. **I could not do this.** There is no working Groq key in this environment — `backend/.env` contains `GROK_API_KEY=your-grok-api-key-from-console.x.ai`, a placeholder, and for the wrong provider (Grok/x.ai vs Groq/GroqCloud).
+
+Everything needed to produce them is committed. Run:
+
+```
+cd backend
+set GROQ_API_KEY=gsk_...          # export GROQ_API_KEY=... on Unix
+python tests/prompt_samples.py > ../prompt-samples.md
+```
+
+18 AI calls: enhance-JD, rank, questions, rejection email, interview invite and deep summary, for each of the three roles. **What to check in the output:**
+1. The agency-placement forklift candidate gets **no "job hopping" red flag**.
+2. Screening question `type` labels **differ by trade** — Safety/Certification for the warehouse role, Technical for the engineer.
+3. Enhanced nursing and warehouse postings carry **shift and licence sections**; the engineering one is not forced to.
+4. The three rejection emails **do not share one corporate register**.
+
+Paste the result here when you have it.
 
 ---
 
