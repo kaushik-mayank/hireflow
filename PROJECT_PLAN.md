@@ -38,26 +38,28 @@
 
 ---
 
-## Phase 1 — Public Marketing Site ⬜ NOT STARTED
+## Phase 1 — Public Marketing Site ✅ COMPLETE (2026-07-23)
 
-Public, unauthenticated routes funnelling into the existing auth flow. Must not touch app internals.
+Commits `dc828fb`, `b682b78`, `ab61af7`. Only pre-existing file touched: `App.js`.
 
-- [ ] **Restructure the `path="*"` catch-all** in `App.js` first — it currently swallows all unknown routes to `/dashboard` and would eat every public route
-- [ ] Persistent public header (Register / Login in the corner) + public footer
-- [ ] **Home** — hero, problem statement, feature highlights (JD enhancement, AI resume ranking, screening questions, comparison, reject/select email automation, dashboard/analytics), social proof, CTA
-- [ ] **Pricing** — clearly "in testing / early access". No implication of live billing
-- [ ] **About** — mission/story, clearly-marked placeholder copy for personal/company facts
-- [ ] **Careers** — generic "we're hiring" placeholder, structure only
-- [ ] **Reviews/Testimonials** — data-driven from an array of testimonial objects; marked placeholders for now
-- [ ] **Privacy Policy** — real, complete, SaaS-handling-candidate-PII appropriate (data collected, third parties, candidate data handling, privacy contact email). Marked as requiring your legal review
-- [ ] **Coming Soon** — teaser panel (icons + short descriptions): resume database integrations, email account connection, bulk email, calendar interview scheduling, external job-portal posting
-- [ ] All marketing copy **role-switch-aware** (rotate/generically reference nursing, warehouse, trades, hospitality, engineering — never corporate-only)
-- [ ] `React.lazy` all marketing routes so they stay out of the authenticated app bundle
-- [ ] Verify responsive behaviour (desktop + mobile)
-- [ ] Verify no leakage into or interference with authenticated routing/guards
-- [ ] Update PROGRESS.md, summarise, **stop**
+- [x] **Restructured the `path="*"` catch-all** — now an auth-aware 404 instead of a silent `/dashboard` redirect
+- [x] Persistent public header (Register / Login in the corner, dashboard link when signed in) + footer, with mobile menu
+- [x] **Home** — hero with rotating job titles, problem, all 6 feature highlights, how-it-works, industries, social proof, roadmap teaser, CTA
+- [x] **Pricing** — labelled early access; every tier shows an unset price, no billing implied
+- [x] **About** — mission/story/values, company facts marked as placeholders
+- [x] **Careers** — structure only; `OPEN_ROLES` empty so it renders an honest no-vacancies state
+- [x] **Reviews** — fully data-driven from `TESTIMONIALS`; self-deriving industry filter + average rating
+- [x] **Privacy Policy** — complete 15-section policy incl. candidate PII, Groq AI disclosure, sub-processors, retention, data rights; flagged for legal review
+- [x] **Coming Soon** — 8-item roadmap teaser, icons + descriptions, no form
+- [x] Copy is **role-switch-aware** — 10 rotating roles, 12-industry section, cross-sector testimonials
+- [x] `React.lazy` on all marketing routes — verified 0 marketing strings in `main.js`
+- [x] Verified no interference with authenticated routing/guards — all three guards unchanged
+- [ ] ⚠️ **Responsive behaviour written but NOT visually verified** — no browser check was possible; carry into Phase 7 QA
+- [x] Updated PROGRESS.md
 
-**Note:** `/` currently redirects to `/dashboard`. Marketing Home takes over `/` — confirm before switching.
+**Behaviour changes to be aware of:** `/` now serves marketing Home (was → `/dashboard`); `*` now renders a 404 (was → `/dashboard`).
+
+**Carried forward:** placeholder copy in About/Careers/Pricing/Privacy/testimonials needs your real content; contact addresses are all `@example.com`.
 
 ---
 
@@ -173,6 +175,8 @@ Checklist seeded from AUDIT.md §8, highest impact first.
 - [ ] Fix the `allow_credentials=True` + `allow_origins="*"` CORS trap
 - [ ] Dedupe `requirements.txt`; drop unimported packages
 - [ ] Full click-through QA: signup → login → forgot password → hiring flow → reports → admin panel → marketing pages → coming soon → feedback form, on desktop **and** one mobile viewport
+- [ ] **Visually verify the Phase 1 marketing pages** — they were built and compile clean but were never opened in a browser (responsive breakpoints, spacing, hero rotation)
+- [ ] Replace Phase 1 placeholder copy: About story/values, Careers content, Pricing tiers, testimonials, and all four `@example.com` contact addresses
 - [ ] Confirm the demo account works directly but is exposed nowhere (nav, footer, login page, marketing site)
 - [ ] Confirm colour/design consistency across every page added in Phases 1–5
 - [ ] Final PROGRESS.md + PROJECT_PLAN.md update; add a "what I'd tackle next" list

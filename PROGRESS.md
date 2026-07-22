@@ -4,8 +4,89 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Phase 0 complete, all blockers cleared → awaiting go-ahead for Phase 1
+**Current phase:** Phase 1 complete → awaiting go-ahead for Phase 2 (Auth overhaul)
 **Last updated:** 2026-07-23
+
+---
+
+## Session 3 — 2026-07-23 — Phase 1: Public marketing site
+
+Built the full pre-login site. **No existing page, component or backend file was touched** — the only pre-existing file modified is `App.js` (routing), confirmed by `git diff --stat`.
+
+### Commits
+| Hash | What |
+|---|---|
+| `dc828fb` | marketing content data layer + shared UI primitives |
+| `b682b78` | the 8 public pages + persistent shell |
+| `ab61af7` | routing rewire, catch-all fix, lazy loading |
+
+### New files (11)
+| File | Purpose |
+|---|---|
+| `src/data/marketing.js` | **All editable copy** — features, steps, industries, testimonials, roadmap. Wording changes never need JSX edits. |
+| `src/components/marketing.jsx` | Shared primitives: `Section`, `SectionHeading`, `Eyebrow`, `FeatureCard`, `LinkButton`, `CTABand`, `PageHero`, `TestimonialCard`, `Rating`, `PlaceholderNote`, `Prose` |
+| `src/pages/marketing/MarketingLayout.jsx` | Persistent header + footer + `Outlet`, mobile menu, scroll-to-top |
+| `src/pages/marketing/Home.jsx` | Hero, problem, features, how-it-works, industries, testimonials, roadmap teaser, CTA |
+| `src/pages/marketing/Pricing.jsx` | Early-access tiers, no live billing |
+| `src/pages/marketing/About.jsx` | Mission + values, placeholders marked |
+| `src/pages/marketing/Careers.jsx` | Structure only, empty vacancy list |
+| `src/pages/marketing/Reviews.jsx` | Data-driven, industry filter, average rating |
+| `src/pages/marketing/Privacy.jsx` | Full policy, 15 sections |
+| `src/pages/marketing/ComingSoon.jsx` | Roadmap teaser, no form |
+| `src/pages/marketing/NotFound.jsx` | Auth-aware 404 |
+
+### New routes
+`/` · `/pricing` · `/about` · `/careers` · `/reviews` · `/privacy` · `/coming-soon` · `*` (404)
+
+All are public and reachable **signed in or out** — the header swaps Log in/Register for a dashboard link. Only `/login` and `/signup` remain wrapped in `PublicRoute`.
+
+### ⚠️ Routing behaviour changes (deliberate, flagged)
+1. **`/` no longer redirects to `/dashboard`** — it now serves the marketing Home. This changes what a signed-in user sees if they navigate to the root. They reach the product via the header.
+2. **`*` no longer silently redirects to `/dashboard`** — it renders a real 404 that links to the dashboard when signed in and to home when not. The old behaviour would have swallowed every marketing route, which is why it had to change.
+
+`PrivateRoute`, `PublicRoute`, `AdminRoute` and every existing app/admin route are **unchanged**.
+
+### Verified
+- **`CI=true yarn build` compiles clean** — warnings-as-errors, so this also proves **zero ESLint warnings and zero webpack warnings**, including that every named import resolves (webpack errors on missing named exports).
+- **Marketing code is genuinely absent from the app bundle** — grepped `main.js` for distinctive marketing strings (`registered nurse`, `Privacy policy`, `Placeholder content`, …): **0 hits**. Each page compiles to its own deferred chunk.
+- **No demo credentials anywhere in the new marketing source** — grepped for `hireflow.com`, `Admin@1234`, `Sarah@1234`, "demo account". Clean. *(The pre-existing card in `Login.jsx:106-110` is still there and still ships in `main.js` — that is Phase 2's job.)*
+- **Scope contained** — `git diff --stat` shows exactly one pre-existing file changed: `App.js` (+29/−3).
+
+### 📊 Bundle impact
+| Asset | Before | After | Δ |
+|---|---|---|---|
+| `main.js` (gzip) | 233.96 kB | **237.85 kB** | +3.89 kB |
+| `main.css` (gzip) | 8.9 kB | 9.55 kB | +0.65 kB |
+| Marketing chunks | — | 10 chunks, **~42.6 kB total** | deferred |
+
+The +3.89 kB in `main.js` is `React.lazy`/`Suspense` wiring and the enlarged route tree, **not** marketing content. A signed-in user downloads none of the 42.6 kB.
+
+### Universal-niche work
+- Hero headline **cycles through 10 deliberately unlike roles** (registered nurse, forklift operator, backend engineer, line cook, delivery driver, retail supervisor, care assistant, CNC machinist, primary teacher, site electrician) — makes the promise visible rather than asserted. Respects `prefers-reduced-motion`.
+- A dedicated **12-industry section** with concrete example roles.
+- Testimonials span healthcare, logistics, trades, hospitality, corporate and education.
+- Copy audited for office-default assumptions — e.g. scheduling is described as "built to handle shift patterns, not just nine-to-five", and pricing explicitly states a shift-work posting costs the same as a senior technical one.
+- Roadmap adds **SMS/WhatsApp outreach** and **certification/licence tracking** — both far more relevant to trades, care and healthcare hiring than to office roles.
+
+### Placeholder content (all clearly marked in-page)
+Rendered with a neutral dashed `PlaceholderNote` — deliberately **not** amber, since amber means "AI" throughout this product and that convention is worth protecting.
+- **Testimonials** — all 6 are invented; each card carries a "Sample — not a real customer" badge, driven by an `isPlaceholder` flag.
+- **About** — story, values and contact address (`hello@example.com`).
+- **Careers** — everything; `OPEN_ROLES` is empty so it renders an honest "no open positions" state. Contact `careers@example.com`.
+- **Pricing** — every tier name, feature split and price is provisional; no tier shows a real number.
+- **Privacy** — contact addresses (`privacy@example.com`, `support@example.com`), legal entity name, retention periods, sub-processor list.
+
+### Privacy policy — needs your attention
+Written to be genuinely accurate to how HireFlow works, not boilerplate. 15 sections covering data collected (including candidate PII from resumes), the controller/processor split (**you are the controller of candidate data, we are the processor**), retention, security, international transfers, cookies, and data-subject rights.
+
+Two things worth reading yourself:
+- **§5 discloses the AI processing plainly** — that resume text is transmitted to **Groq**, that output is assistive only, and that no candidate is rejected by automated processing. This is the section most likely to matter legally and it is stated honestly.
+- **§7 lists sub-processors**: MongoDB Atlas, Render, Groq, Firebase, Google Fonts. **Firebase is listed although Phase 2 has not integrated it yet** — accurate by the time this ships, but confirm before publishing.
+
+Carries a prominent red banner: **not written by a lawyer, requires legal review**.
+
+### Not verified
+- **No browser rendering check.** The build compiles and all imports resolve, but nothing here has been opened in a browser. Layout, spacing, responsive breakpoints and the hero rotation are unconfirmed. **This is the main thing to eyeball.**
 
 ---
 
