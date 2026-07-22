@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Briefcase, BarChart3, Users, FileText, Activity, DollarSign, LogOut, Hexagon } from "lucide-react";
+import { LayoutDashboard, Briefcase, BarChart3, Users, FileText, Activity, DollarSign, LogOut, Hexagon, Shield } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Avatar } from "@/components/ui";
 
@@ -26,6 +26,15 @@ export function Sidebar() {
         <div className="flex items-center gap-2 text-white">
           <Hexagon size={20} className="text-indigo" fill="#4f6ef7" />
           <span className="text-[17px] font-semibold tracking-tight">HireFlow</span>
+          {isAdmin && (
+            <span
+              className="ml-auto rounded-md bg-purple/25 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-purple-light"
+              data-testid="admin-badge"
+              title="You are signed in as the platform administrator"
+            >
+              Admin
+            </span>
+          )}
         </div>
         <div className="text-[11px] uppercase tracking-wider text-white/35 mt-1 ml-7">AI Hiring Platform</div>
       </div>
@@ -44,7 +53,10 @@ export function Sidebar() {
 
         {isAdmin && (
           <>
-            <div className="text-[10px] uppercase tracking-wider text-white/25 px-5 py-2 mt-4">Admin</div>
+            <div className="mt-5 mx-2 border-t border-purple/25" />
+            <div className="text-[10px] uppercase tracking-wider text-purple-light/70 px-5 py-2 mt-2 flex items-center gap-1.5">
+              <Shield size={11} /> Platform Admin
+            </div>
             <NavLink to="/admin" end className={navItem} data-testid="nav-admin-dashboard">
               <LayoutDashboard size={17} /> Admin Dashboard
             </NavLink>

@@ -86,6 +86,8 @@ frontend/node_modules/.cache/default-development/6.pack
 .env
 .env.*
 *.env
+# ...but the documented template must be committed. It contains no real values.
+!.env.example
 credentials.json
 *.key
 .credentials

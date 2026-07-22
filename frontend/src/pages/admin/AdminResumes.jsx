@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Search, FileText, ChevronLeft, ChevronRight, Eye } from "lucide-react";
-import { adminApi } from "@/api";
+import { adminApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
-import { Card, Avatar, ScoreBadge, StageBadge, Button, Skeleton, EmptyState } from "@/components/ui";
+import { Card, Avatar, ScoreBadge, StageBadge, Button, Skeleton, EmptyState, Modal, Spinner } from "@/components/ui";
 import { fmtDate } from "@/constants";
 
 export default function AdminResumes() {
@@ -11,8 +10,25 @@ export default function AdminResumes() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const navigate = useNavigate();
+  const [detail, setDetail] = useState(null);
+  const [detailFor, setDetailFor] = useState(null);
+  const [detailError, setDetailError] = useState("");
   const PAGE_SIZE = 50;
+
+  /* Opens the raw stored record for support and moderation. Deliberately not a
+     link to /candidates/:id — that route is scoped to the owning HR user and
+     403s for an admin looking at someone else's candidate. */
+  const openDetail = async (row) => {
+    setDetailFor(row);
+    setDetail(null);
+    setDetailError("");
+    try {
+      const res = await adminApi.resumeDetail(row.id);
+      setDetail(res.data);
+    } catch (err) {
+      setDetailError(apiErr(err, "Could not load this record"));
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -71,7 +87,7 @@ export default function AdminResumes() {
                       <td className="px-4 py-3"><ScoreBadge score={c.ai_score} /></td>
                       <td className="px-4 py-3 text-gray-500 text-xs truncate max-w-[160px]">{c.file_name || "—"}</td>
                       <td className="px-4 py-3 text-right">
-                        <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => navigate(`/candidates/${c.id}`)} title="View profile" data-testid={`resume-view-${c.id}`}><Eye size={15} /></Button>
+                        <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => openDetail(c)} title="View stored record" data-testid={`resume-view-${c.id}`}><Eye size={15} /></Button>
                       </td>
                     </tr>
                   ))}
@@ -80,6 +96,35 @@ export default function AdminResumes() {
             </div>
           ) : <EmptyState icon={FileText} title="No resumes found" subtitle="Resumes uploaded by any HR user will appear here." />}
         </Card>
+
+        <Modal
+          open={!!detailFor}
+          onClose={() => setDetailFor(null)}
+          title={detailFor ? `Stored record — ${detailFor.candidate_name}` : ""}
+          width="max-w-3xl"
+        >
+          {detailError ? (
+            <div className="bg-coral-light text-coral text-sm rounded-lg px-4 py-2.5">{detailError}</div>
+          ) : !detail ? (
+            <div className="flex justify-center py-10"><Spinner size={22} className="text-indigo" /></div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-600">
+                <div><span className="font-semibold text-gray-700">Job: </span>{detail.job?.title || "—"}</div>
+                <div><span className="font-semibold text-gray-700">HR user: </span>{detail.hr_user?.name || "—"}{detail.hr_user?.email ? ` (${detail.hr_user.email})` : ""}</div>
+              </div>
+              <div className="rounded-lg border border-amber bg-amber-light px-4 py-2.5 text-xs leading-relaxed text-[#92400e]">
+                This is candidate personal data shown for support and moderation. Handle it accordingly.
+              </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-1.5">Raw record (JSON)</div>
+                <pre className="max-h-[45vh] overflow-auto rounded-lg bg-gray-50 border border-gray-200 p-4 font-mono text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap break-words" data-testid="resume-json">
+                  {JSON.stringify(detail.candidate, null, 2)}
+                </pre>
+              </div>
+            </div>
+          )}
+        </Modal>
       </PageBody>
     </Layout>
   );

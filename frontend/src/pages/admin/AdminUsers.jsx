@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, ShieldCheck, ShieldOff, UserCog } from "lucide-react";
+import { Search, ShieldCheck, ShieldOff, Lock, Info } from "lucide-react";
 import { adminApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Avatar, Button, Skeleton, EmptyState } from "@/components/ui";
@@ -27,15 +27,6 @@ export default function AdminUsers() {
     } catch (err) { toast.error(apiErr(err)); }
   };
 
-  const toggleRole = async (u) => {
-    const next = u.role === "admin" ? "hr" : "admin";
-    try {
-      await adminApi.setRole(u.id, next);
-      toast.success(`${u.name} is now ${next}`);
-      load();
-    } catch (err) { toast.error(apiErr(err)); }
-  };
-
   const filtered = users.filter((u) => {
     const okSearch = `${u.name} ${u.email} ${u.company || ""}`.toLowerCase().includes(search.toLowerCase());
     const okRole = roleFilter === "all" || u.role === roleFilter;
@@ -45,8 +36,18 @@ export default function AdminUsers() {
 
   return (
     <Layout>
-      <Topbar title="User Management" subtitle="Manage accounts, roles, and access" />
+      <Topbar title="User Management" subtitle="Manage HR accounts and access" />
       <PageBody fullWidth>
+        <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-gray-200 bg-white px-4 py-3 text-xs leading-relaxed text-gray-600">
+          <Info size={14} className="mt-0.5 shrink-0 text-indigo" />
+          <p>
+            Roles can no longer be changed from here. Admin access is granted only by the server-side
+            allowlist (<span className="font-mono">backend/admin.credentials.json</span> or the{" "}
+            <span className="font-mono">ADMIN_EMAILS</span> environment variable), so it can never be
+            requested at signup or escalated through the API.
+          </p>
+        </div>
+
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -97,10 +98,15 @@ export default function AdminUsers() {
                       <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(u.created_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1.5">
-                          <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => toggleRole(u)} title="Change role" data-testid={`role-toggle-${u.id}`}><UserCog size={15} /></Button>
-                          <Button variant={u.is_active ? "ghost" : "secondary"} className="!px-2 !py-1.5" onClick={() => toggleStatus(u)} title={u.is_active ? "Deactivate" : "Reactivate"} data-testid={`status-toggle-${u.id}`}>
-                            {u.is_active ? <ShieldOff size={15} className="text-coral" /> : <ShieldCheck size={15} className="text-green" />}
-                          </Button>
+                          {u.role === "admin" ? (
+                            <span className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[11px] text-gray-600" title="Admin comes from the server-side allowlist and cannot be changed here">
+                              <Lock size={13} /> Allowlisted
+                            </span>
+                          ) : (
+                            <Button variant={u.is_active ? "ghost" : "secondary"} className="!px-2 !py-1.5" onClick={() => toggleStatus(u)} title={u.is_active ? "Deactivate" : "Reactivate"} data-testid={`status-toggle-${u.id}`}>
+                              {u.is_active ? <ShieldOff size={15} className="text-coral" /> : <ShieldCheck size={15} className="text-green" />}
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>

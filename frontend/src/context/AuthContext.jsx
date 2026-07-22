@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { authApi } from "@/api";
+import { firebaseSignOut } from "@/lib/firebase";
 
 const AuthContext = createContext(null);
 
@@ -39,6 +40,9 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("hireflow_token");
     setToken(null);
     setUser(null);
+    // Clear the Firebase session too, otherwise the browser stays signed in to
+    // Firebase and the next sign-in silently reuses the old identity.
+    firebaseSignOut();
   };
 
   return (

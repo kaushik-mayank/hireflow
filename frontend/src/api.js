@@ -31,6 +31,8 @@ export const apiErr = (err, fallback = "Something went wrong") =>
 export const authApi = {
   signup: (data) => client.post("/auth/signup", data),
   login: (data) => client.post("/auth/login", data),
+  // Exchanges a verified Firebase ID token for this app's own JWT.
+  firebase: (data) => client.post("/auth/firebase", data),
   me: () => client.get("/auth/me"),
 };
 
@@ -80,8 +82,9 @@ export const adminApi = {
   dashboard: () => client.get("/admin/dashboard"),
   users: () => client.get("/admin/users"),
   setStatus: (id, is_active) => client.put(`/admin/users/${id}/status`, { is_active }),
-  setRole: (id, role) => client.put(`/admin/users/${id}/role`, { role }),
+  // No setRole: roles are decided by the server-side admin allowlist only.
   resumes: (page = 1, page_size = 50) => client.get(`/admin/resumes?page=${page}&page_size=${page_size}`),
+  resumeDetail: (id) => client.get(`/admin/resumes/${id}`),
   analytics: () => client.get("/admin/analytics"),
   aiUsage: (page = 1, page_size = 50) => client.get(`/admin/ai-usage?page=${page}&page_size=${page_size}`),
 };

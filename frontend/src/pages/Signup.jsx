@@ -4,6 +4,7 @@ import { Hexagon, ArrowRight } from "lucide-react";
 import { authApi, apiErr } from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Spinner } from "@/components/ui";
+import { isFirebaseConfigured, firebaseSignUp, firebaseErrorMessage } from "@/lib/firebase";
 
 function strength(pw) {
   let s = 0;
@@ -15,7 +16,9 @@ function strength(pw) {
 }
 
 export default function Signup() {
-  const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "", company: "", role: "hr" });
+  // NOTE: there is deliberately no `role` here. Public signup always creates a
+  // standard HR account; the server ignores any role sent by a client.
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "", company: "" });
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,12 +42,26 @@ export default function Signup() {
     setServerError("");
     if (!validate()) return;
     setLoading(true);
+
     try {
-      const res = await authApi.signup({
-        name: form.name, email: form.email, password: form.password,
-        company: form.company, role: form.role,
-      });
-      login(res.data.token, res.data.user);
+      if (isFirebaseConfigured) {
+        let idToken;
+        try {
+          idToken = await firebaseSignUp(form.email, form.password);
+        } catch (fbErr) {
+          setServerError(firebaseErrorMessage(fbErr, "Could not create account"));
+          return;
+        }
+        const res = await authApi.firebase({
+          id_token: idToken, name: form.name, company: form.company,
+        });
+        login(res.data.token, res.data.user);
+      } else {
+        const res = await authApi.signup({
+          name: form.name, email: form.email, password: form.password, company: form.company,
+        });
+        login(res.data.token, res.data.user);
+      }
       navigate("/dashboard");
     } catch (err) {
       setServerError(apiErr(err, "Could not create account"));
@@ -61,15 +78,15 @@ export default function Signup() {
   return (
     <div className="min-h-screen flex">
       <div className="hidden lg:flex w-[45%] bg-navy relative overflow-hidden flex-col justify-between p-12">
-        <div className="flex items-center gap-2 text-white">
+        <Link to="/" className="flex items-center gap-2 text-white">
           <Hexagon size={24} className="text-indigo" fill="#4f6ef7" />
           <span className="text-xl font-semibold">HireFlow</span>
-        </div>
+        </Link>
         <div className="relative z-10">
           <h2 className="text-white text-4xl font-semibold leading-tight">Build your hiring<br /><span className="text-indigo">command center.</span></h2>
-          <p className="text-white/55 mt-5 text-[15px] max-w-md leading-relaxed">Set a hiring quota, upload resumes, and watch AI rank and move candidates through your pipeline.</p>
+          <p className="text-white/55 mt-5 text-[15px] max-w-md leading-relaxed">Set how many people you need, upload the applications, and watch AI rank and move candidates through your pipeline — for any role, in any industry.</p>
         </div>
-        <div className="text-white/30 text-xs">© 2026 HireFlow Inc.</div>
+        <div className="text-white/30 text-xs">© {new Date().getFullYear()} HireFlow</div>
         <div className="absolute -right-24 -bottom-24 w-80 h-80 rounded-full bg-indigo/20 blur-3xl" />
       </div>
 
@@ -83,17 +100,17 @@ export default function Signup() {
           <form onSubmit={submit} className="mt-6 space-y-3.5">
             <div>
               <label className="text-sm font-medium text-gray-700">Full Name</label>
-              <input value={form.name} onChange={set("name")} className={`mt-1.5 ${field("name")}`} placeholder="Jane Doe" data-testid="signup-name" />
+              <input value={form.name} onChange={set("name")} className={`mt-1.5 ${field("name")}`} placeholder="Alex Morgan" data-testid="signup-name" />
               {errors.name && <p className="text-xs text-coral mt-1">{errors.name}</p>}
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700">Email</label>
-              <input type="email" value={form.email} onChange={set("email")} className={`mt-1.5 ${field("email")}`} placeholder="you@company.com" data-testid="signup-email" />
+              <input type="email" value={form.email} onChange={set("email")} className={`mt-1.5 ${field("email")}`} placeholder="you@work-email.com" data-testid="signup-email" />
               {errors.email && <p className="text-xs text-coral mt-1">{errors.email}</p>}
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700">Company Name</label>
-              <input value={form.company} onChange={set("company")} className={`mt-1.5 ${field("company")}`} placeholder="Acme Corp" data-testid="signup-company" />
+              <label className="text-sm font-medium text-gray-700">Organisation</label>
+              <input value={form.company} onChange={set("company")} className={`mt-1.5 ${field("company")}`} placeholder="Company, clinic, site or agency" data-testid="signup-company" />
             </div>
             <div className="flex gap-3">
               <div className="flex-1">
@@ -114,17 +131,16 @@ export default function Signup() {
             )}
             {errors.password && <p className="text-xs text-coral">{errors.password}</p>}
             {errors.confirm && <p className="text-xs text-coral">{errors.confirm}</p>}
-            <div>
-              <label className="text-sm font-medium text-gray-700">Role</label>
-              <select value={form.role} onChange={set("role")} className={`mt-1.5 ${field("role")}`} data-testid="signup-role">
-                <option value="hr">HR User</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
+
             <Button type="submit" disabled={loading} className="w-full" data-testid="signup-submit">
               {loading ? <Spinner size={16} /> : <>Create account <ArrowRight size={16} /></>}
             </Button>
           </form>
+
+          <p className="mt-4 text-xs text-gray-600 text-center leading-relaxed">
+            By creating an account you agree to our{" "}
+            <Link to="/privacy" className="text-indigo hover:underline">Privacy Policy</Link>.
+          </p>
 
           <div className="mt-5 text-sm text-gray-600 text-center">
             Already have an account?{" "}

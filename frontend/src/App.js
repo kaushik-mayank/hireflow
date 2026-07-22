@@ -3,8 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Spinner } from "@/components/ui";
-import Login from "@/pages/Login";
-import Signup from "@/pages/Signup";
 import Dashboard from "@/pages/Dashboard";
 import Jobs from "@/pages/Jobs";
 import JobCreate from "@/pages/JobCreate";
@@ -17,6 +15,12 @@ import AdminUsers from "@/pages/admin/AdminUsers";
 import AdminResumes from "@/pages/admin/AdminResumes";
 import AdminAnalytics from "@/pages/admin/AdminAnalytics";
 import AdminAIUsage from "@/pages/admin/AdminAIUsage";
+
+/* Auth pages are lazy-loaded so the Firebase SDK — which only they use — stays
+   out of the authenticated app's bundle. */
+const Login = lazy(() => import("@/pages/Login"));
+const Signup = lazy(() => import("@/pages/Signup"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
 
 /* The public marketing site is lazy-loaded so it stays out of the
    authenticated app's bundle — a signed-in user never downloads it. */
@@ -78,6 +82,7 @@ function AppRoutes() {
 
       <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
       <Route path="/signup" element={<PublicRoute><Signup /></PublicRoute>} />
+      <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
 
       <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
       <Route path="/jobs" element={<PrivateRoute><Jobs /></PrivateRoute>} />
