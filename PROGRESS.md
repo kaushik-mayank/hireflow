@@ -42,8 +42,22 @@ All seven open questions answered by the owner. Setup actioned; **still no appli
 - **`/uploads` is mounted as unauthenticated `StaticFiles`** ([server.py:67-72](backend/server.py#L67-L72)) — any PDF still on disk is fetchable by URL with no auth check. Unguessable UUIDs and nothing linking to it make this low-risk today, but it is an open PII endpoint by design. → backlog.
 - **A future PDF viewer/download is not buildable on current storage.** `PRD.md` lists "in-app PDF viewer/serving in candidate detail" as a P2 item; because binaries sit on ephemeral disk and are never served, that feature would need object storage (S3/GCS) or GridFS. → backlog.
 
-### Still to confirm
-- Whether `yarn install` succeeds cleanly and whether **react-scripts 5.0.1 builds under Node 24** (a much newer runtime than that toolchain targets). Result recorded at the next boundary.
+### ✅ Toolchain verified — the app builds
+
+- **`yarn install`** — exit 0 in 138s. Warnings only (deprecated transitive `workbox`/`jsdom` packages, peer-dep mismatches for `react-day-picker`, `recharts`, missing `typescript`). All benign for CRA 5; nothing blocks.
+- **`yarn build`** — **`Compiled successfully.`** in 26s. react-scripts 5.0.1 works fine on Node 24 despite the age gap. **This is the first time the product has been verifiably built in this engagement**, so every phase from here can be sanity-checked for real.
+- **`yarn.lock` created and committed.** The project previously had **no lockfile of any kind**, meaning every Render deploy re-resolved the dependency tree from scratch and could silently drift. Now pinned and reproducible. ⚠️ *This changes Render's install behaviour (lockfile-driven rather than fresh resolution) — flagged for the owner; trivially revertable by deleting the file.*
+
+### 📊 Phase 6 performance baseline (measure against this)
+
+Production build, gzipped:
+
+| Asset | Size |
+|---|---|
+| `build/static/js/main.<hash>.js` | **233.96 kB** |
+| `build/static/css/main.<hash>.css` | 8.9 kB |
+
+**One single JS chunk — no code-splitting whatsoever**, exactly as predicted in AUDIT.md §8.1. Every visitor downloads all 12 pages, the 5 admin pages and recharts before seeing anything. This 233.96 kB figure is the number Phase 1 (lazy-loaded marketing routes) and Phase 6 must beat.
 
 ---
 
