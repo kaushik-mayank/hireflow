@@ -1,0 +1,53 @@
+{
+  "summary": "End-to-end testing of HireFlow MVP - backend (auth/jobs/candidates/dashboard/7 AI endpoints) via pytest and frontend E2E (login, dashboard, job detail, kanban drag/move, candidate detail with AI questions, job create with Enhance JD modal). Found 1 backend bug: bulk stage update endpoint is shadowed by parametric route.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "PUT /api/candidates/bulk/stage",
+        "issue": "Endpoint unreachable - FastAPI route ordering bug. PUT /api/candidates/{candidate_id}/stage is registered BEFORE /candidates/bulk/stage in routes_candidates.py, so any PUT to /candidates/bulk/stage is captured by the parametric route with candidate_id='bulk' and returns 404 ('Candidate not found'). The frontend JobDetail bulk-stage-select feature WILL NOT WORK. Fix: either move the /bulk/stage route definition ABOVE /{candidate_id}/stage in routes_candidates.py, or rename the route path (e.g. /candidates/_bulk/stage).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "JobDetail → Bulk move candidates",
+        "issue": "Selecting candidates and choosing a stage from the bulk-stage-select dropdown silently fails (backend returns 404 due to the route-ordering bug above). UI will not move candidates in bulk.",
+        "affected_selectors": ["[data-testid='bulk-stage-select']", "[data-testid='bulk-bar']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix route-ordering bug in /app/backend/routes_candidates.py: move @router.put('/bulk/stage') above @router.put('/{candidate_id}/stage'). After fix, re-run TestCandidates::test_upload_pdf_and_lifecycle to verify the bulk endpoint returns 200 and the JobDetail UI bulk-move flow works."
+  ],
+  "critical_code_review_comments": [
+    "FastAPI route ordering: literal paths (e.g. /bulk/stage) MUST be declared before parametric paths sharing the same prefix (/{candidate_id}/stage) - this is a recurring pitfall.",
+    "Auth uses bcrypt + JWT correctly; /api/auth/me returns 401 without token as expected.",
+    "PDF upload validates content-type and rejects non-PDF (test confirmed).",
+    "All 7 AI endpoints return structured JSON with reasonable latency (3-15s each via Claude Sonnet 4.5).",
+    "data-testid coverage is thorough across all pages - excellent test affordance.",
+    "Auth guard (PrivateRoute/AdminRoute) correctly redirects unauthenticated users to /login and non-admin users away from /admin/*."
+  ],
+  "updated_files": [
+    "/app/backend/tests/__init__.py",
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "95.6% (22/23 - only the bulk stage endpoint failed)",
+    "frontend": "100% (all tested flows: login, auth-guard, dashboard, job detail, kanban, candidate detail with AI questions, stage moves, job create + enhance-jd modal)"
+  },
+  "test_credentials": "HR sarah@hireflow.com / Sarah@1234 ; Admin admin@hireflow.com / Admin@1234 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Tests create TEST_ prefixed users/jobs/candidates via signup, /api/jobs, /api/candidates/upload; all TEST_ data is deleted in same test (cleanup verified by GET-after-DELETE → 404). Cleaned up TEST_E2E Engineer job created by playwright run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/backend_test.py - run with: pytest /app/backend/tests/backend_test.py -v. AI tests take ~60s (real Claude calls). Reuse fixtures hr_token/admin_token/hr_headers. The signup test must use @example.com (Pydantic EmailStr rejects @hireflow.test as reserved domain). After main agent fixes the bulk-stage route ordering, re-run TestCandidates::test_upload_pdf_and_lifecycle to confirm bulk endpoint returns 200.",
+  "rca of the issue": "ROOT CAUSE: In /app/backend/routes_candidates.py, the dynamic route `@router.put('/{candidate_id}/stage')` is registered BEFORE the literal route `@router.put('/bulk/stage')`. FastAPI matches routes in registration order, so any PUT to /api/candidates/bulk/stage gets matched by /{candidate_id}/stage with candidate_id='bulk', then the handler queries Mongo for a candidate with id='bulk', finds none, and returns 404. REPRODUCTION: `curl -X PUT $BACKEND_URL/api/candidates/bulk/stage -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' -d '{\"candidate_ids\":[\"<id>\"],\"stage\":\"Shortlisted\"}'` → 404. MITIGATION: In routes_candidates.py, move the `bulk_update_stage` handler decorator above `update_candidate_stage`, OR change path to e.g. `/bulk-stage` (and update frontend api.js accordingly)."
+}
