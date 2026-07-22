@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
@@ -16,6 +17,18 @@ import AdminUsers from "@/pages/admin/AdminUsers";
 import AdminResumes from "@/pages/admin/AdminResumes";
 import AdminAnalytics from "@/pages/admin/AdminAnalytics";
 import AdminAIUsage from "@/pages/admin/AdminAIUsage";
+
+/* The public marketing site is lazy-loaded so it stays out of the
+   authenticated app's bundle — a signed-in user never downloads it. */
+const MarketingLayout = lazy(() => import("@/pages/marketing/MarketingLayout"));
+const Home = lazy(() => import("@/pages/marketing/Home"));
+const Pricing = lazy(() => import("@/pages/marketing/Pricing"));
+const About = lazy(() => import("@/pages/marketing/About"));
+const Careers = lazy(() => import("@/pages/marketing/Careers"));
+const Reviews = lazy(() => import("@/pages/marketing/Reviews"));
+const Privacy = lazy(() => import("@/pages/marketing/Privacy"));
+const ComingSoon = lazy(() => import("@/pages/marketing/ComingSoon"));
+const NotFound = lazy(() => import("@/pages/marketing/NotFound"));
 
 function FullScreenLoader() {
   return (
@@ -50,6 +63,19 @@ function AdminRoute({ children }) {
 function AppRoutes() {
   return (
     <Routes>
+      {/* Public marketing site. Reachable signed in or out — the header swaps
+          Log in / Register for a link back to the dashboard. */}
+      <Route element={<MarketingLayout />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/pricing" element={<Pricing />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/careers" element={<Careers />} />
+        <Route path="/reviews" element={<Reviews />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/coming-soon" element={<ComingSoon />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
+
       <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
       <Route path="/signup" element={<PublicRoute><Signup /></PublicRoute>} />
 
@@ -66,8 +92,6 @@ function AppRoutes() {
       <Route path="/admin/resumes" element={<AdminRoute><AdminResumes /></AdminRoute>} />
       <Route path="/admin/analytics" element={<AdminRoute><AdminAnalytics /></AdminRoute>} />
       <Route path="/admin/ai-usage" element={<AdminRoute><AdminAIUsage /></AdminRoute>} />
-
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 }
@@ -76,7 +100,9 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <Suspense fallback={<FullScreenLoader />}>
+          <AppRoutes />
+        </Suspense>
         <Toaster position="bottom-right" richColors closeButton />
       </BrowserRouter>
     </AuthProvider>
