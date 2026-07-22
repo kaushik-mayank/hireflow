@@ -4,8 +4,55 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Phase 5 complete → awaiting go-ahead for Phase 6 (Performance pass)
+**Current phase:** Phase 6 complete → awaiting go-ahead for Phase 7 (Bug bash & final QA)
 **Last updated:** 2026-07-23
+
+---
+
+## Session 8 — 2026-07-23 — Phase 6: Performance pass
+
+### 📊 Headline: entry bundle down 56%
+
+| Measurement | Before | After | Change |
+|---|---|---|---|
+| `main.js` (gzip) | 246.15 kB | **108.37 kB** | **−137.8 kB (−56%)** |
+| `main.css` (gzip) | 9.71 kB | 9.61 kB | −0.1 kB |
+| Deferred chunks | 19 | 31 | recharts now a 105.9 kB on-demand chunk |
+
+Against the **original Phase 0 baseline of 233.96 kB** this is **−54%**, even after adding a marketing site, Firebase, the feedback system and a much larger Reports page.
+
+**Verified absent from `main.js`:** `recharts`, `d3-scale`, firebase auth (`identitytoolkit`), `QueryClient`.
+
+### What actually moved the needle
+
+1. **Route-level code splitting.** Only `Dashboard` stays eager — it's where every sign-in lands, so deferring it would trade bundle size for a spinner on the most common path. The decisive one was **Reports**: the only eager page importing recharts, so every user downloaded the entire charting library on sign-in whether or not they opened a chart. The six admin pages were also eager despite being reachable by **exactly one account on the platform**.
+2. **Removed the `@tanstack/react-query` provider.** It wrapped the whole app but **no component ever called a react-query hook** — fetching is axios in `useEffect`. The library was bundled to supply a context with no consumers.
+3. **Fonts were loaded twice and badly.** `index.html` pulled in **Inter, which nothing references** (Tailwind is configured for DM Sans), while the DM families came via a render-blocking `@import` at the top of `index.css` — which cannot even start until the stylesheet has itself downloaded. Now one `<link>` for the fonts actually in use.
+4. **`AuthContext` value memoised.** It was a fresh object literal every render, so every consumer in the app re-rendered whenever the provider did, even when nothing about the session changed.
+
+### Backend query fixes
+
+| Fix | Before | After |
+|---|---|---|
+| `GET /jobs` | **One candidates query per job** — 30 postings = 31 round-trips per page load | 2 queries regardless of count |
+| `PUT /candidates/bulk-stage` | 2 lookups per id, then an update + insert each — moving 50 candidates was **200+ round-trips** | Fixed query count + 2 bulk writes |
+| Indexes | Nothing on `candidates.stage`/`uploaded_at` or `jobs.status`/`created_at`, despite every dashboard and reports request filtering on exactly those | Compound indexes covering the real access paths, plus sparse `users.firebase_uid` |
+
+`GET /jobs` is the most likely cause of the slowness you reported.
+
+### Deliberately NOT done — needs your decision
+- **`frontend/src/components/ui/` (~40 shadcn files) is fully orphaned** — verified nothing imports from it. Same for `hooks/use-toast.js` and `constants/testIds/`. Deleting files needs your approval. **Note: removing them will not shrink the bundle** — webpack only bundles reachable modules, so they already cost nothing at runtime. It's a repo-hygiene and install-time win only.
+- **Unused dependencies** confirmed unimported: `swr`, `framer-motion`, `embla-carousel-react`, `vaul`, `react-day-picker`, `input-otp`, `cmdk`, `lodash`, `date-fns`, `dayjs`, `react-hook-form`, `zod`, `@hookform/resolvers`, `next-themes`, `react-resizable-panels`, `class-variance-authority`, and now `@tanstack/react-query`. Same caveat — pruning `package.json` speeds installs, not runtime.
+
+### Not done, and why
+- **Render memoisation of the Kanban board.** Listed in the plan, but memoisation without profiling is speculative — `React.memo` silently does nothing if props include inline closures. This needs a browser profile I cannot run. Carried to Phase 7.
+- **AI result caching** — ranking already skips analysed candidates unless `reanalyze` is set, so the remaining win is small and would need a JD content hash to be correct.
+
+### ⚠️ Measurement caveat
+Bundle sizes are **real and measured**. Backend improvements are **structural, not benchmarked** — the query counts are objectively reduced and the indexes objectively added, but with no local database and no production access I could not time before/after. The N+1 removals are the kind of change whose benefit grows with data volume.
+
+### Also noted
+`tests/backend_test.py` and `tests/test_admin_reports.py` fail at collection — they hardcode `/app/frontend/.env`, a container path from the original Emergent scaffold. **Pre-existing, unrelated to any of my changes.** Logged to backlog.
 
 ---
 

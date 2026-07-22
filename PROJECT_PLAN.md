@@ -191,7 +191,15 @@ Funnel with drop-off, time-to-hire + trend, source effectiveness, aging postings
 
 ---
 
-## Phase 6 — Performance Pass ⬜ NOT STARTED
+## Phase 6 — Performance Pass ✅ COMPLETE (2026-07-23)
+
+**`main.js` 246.15 kB → 108.37 kB gzip (−56%).** Route-level code splitting (recharts and the admin panel now on-demand), unused react-query provider removed, double font loading fixed, `AuthContext` memoised. Backend: `GET /jobs` N+1 removed (31 round-trips → 2), bulk-stage N+1 removed (200+ → a handful), indexes added for the real access paths.
+
+**Awaiting your call:** deleting the orphaned `components/ui/` folder + pruning ~17 unused dependencies. Neither shrinks the bundle (unreachable modules aren't bundled) — it's repo hygiene and install speed only.
+
+**Carried to Phase 7:** Kanban render memoisation — needs a browser profile to do correctly rather than speculatively.
+
+
 
 Checklist seeded from AUDIT.md §8, highest impact first.
 
