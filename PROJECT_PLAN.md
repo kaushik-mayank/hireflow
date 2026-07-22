@@ -11,7 +11,7 @@
 - [ ] **Read before editing.** Never edit an unopened file. Grep to confirm existing patterns before adding more of the same.
 - [ ] **Preserve the design system.** Reuse existing tokens (`navy`/`indigo`/`amber` AI accent), spacing, `ui.jsx` primitives. No new visual language for new pages.
 - [ ] **No unrelated refactors.** Log strays under "Backlog / Not in scope" in PROGRESS.md.
-- [ ] **Small, reviewable commits** per logical unit — *blocked: repo is not git-initialised (see Phase 0 open questions).*
+- [ ] **Small, reviewable commits** per logical unit — *unblocked: repo initialised on `main`, baseline `11383e9`.*
 - [ ] **Secrets discipline.** Follow Phase 2 credential instructions exactly; they override generic env-file instinct.
 - [ ] **Ask before destructive actions** — deleting files, dropping DB fields, removing routes. Confirm in writing first.
 - [ ] **Persist memory.** Keep PROJECT_PLAN.md + PROGRESS.md current. Read both at the start of every session.
@@ -63,7 +63,10 @@ Public, unauthenticated routes funnelling into the existing auth flow. Must not 
 
 ## Phase 2 — Auth Overhaul: Firebase, Role Lockdown, Hardcoded Admin ⬜ NOT STARTED
 
-- [ ] **Decide + agree migration strategy** (full Firebase replacement vs Firebase-signin bridged to existing JWT) — existing bcrypt passwords do not transfer; a full swap forces password resets for existing users
+- [x] **Migration strategy decided: Firebase-signin bridged to the existing JWT.** Firebase owns credentials, signup, verification and password reset. On successful Firebase sign-in the frontend exchanges the Firebase ID token at a new backend endpoint, which verifies it, looks up/creates the matching `users` record, and returns **the app's existing JWT** — so `AuthContext`, the axios interceptor, `get_current_user` and every existing route keep working unchanged. Existing users are **not** forced to reset passwords.
+  - [ ] Add `firebase-admin` to `requirements.txt` (absent today) to verify Firebase ID tokens server-side
+  - [ ] New endpoint (e.g. `POST /api/auth/firebase`) — verify ID token → find-or-create user → mint existing JWT
+  - [ ] Keep the legacy bcrypt login path working during transition (existing accounts)
 - [ ] **Close every admin-escalation path:**
   - [ ] `models.py` — remove `role` from `SignupRequest`
   - [ ] `routes_auth.py:28` — public signup hardcoded to `"hr"`, never client-settable
@@ -133,7 +136,7 @@ Source: AUDIT.md §3 (all 7 prompts quoted verbatim).
 
 - [ ] Time-to-hire per posting + average across postings *(already exists — improve)*
 - [ ] Pipeline conversion funnel (applied → screened → interviewed → offered → hired) with **per-stage drop-off rates** — `stage_transitions` has a full timestamped audit trail to support this
-- [ ] Source effectiveness — **⚠️ BLOCKED: no `source` field on candidates.** Needs a schema addition + capture UI, or drop from scope. Your call
+- [ ] Source effectiveness — ✅ **unblocked, approved.** Add a `source` field to candidates (schema default + capture UI on upload; backfill existing rows as `Unknown`), then report which channel yields more qualified/hired candidates
 - [ ] Open vs closed postings over time; **flag aging open postings** with no movement
 - [ ] Auto-generated plain-language written insight section under the charts — **`build_health_prompt` already does exactly this and can be reused**
 - [ ] Replace the fabricated `est_completion` estimate with something defensible or remove it
@@ -152,7 +155,7 @@ Checklist seeded from AUDIT.md §8, highest impact first.
 - [ ] **Missing DB indexes** — nothing on `candidates.stage`, `candidates.uploaded_at`, `jobs.status`, `jobs.created_at`
 - [ ] Time-to-hire N+1 (`routes_reports.py:33`) and bulk-stage N+1 (`routes_candidates.py:168`)
 - [ ] Prune unused heavy deps (`@tanstack/react-query`, `swr`, `framer-motion`, `embla-carousel`, `vaul`, ~40 unused shadcn components)
-- [ ] **Verify `lodash: "4.18.1"`** — that version does not exist; a clean install may fail
+- [ ] Check whether `lodash` is actually imported anywhere (the version pin is fine — `4.18.1` is real and current; my earlier "does not exist" note was wrong and is retracted)
 - [ ] Move the render-blocking Google Fonts `@import` out of `index.css` into `<link>` tags
 - [ ] Memoize expensive renders (Kanban board, resume lists, comparison views); stabilise the `AuthContext` value object
 - [ ] Reduce the boot auth waterfall (render → `/auth/me` → page fetch)
@@ -176,12 +179,12 @@ Checklist seeded from AUDIT.md §8, highest impact first.
 
 ---
 
-## Cross-phase blockers awaiting your decision
+## Cross-phase decisions — ALL RESOLVED 2026-07-23
 
-1. **`git init`?** No repo exists → no commits possible.
-2. **Node/npm absent** → frontend cannot be built or verified locally.
-3. **Secrets rotation** — live Atlas password + `JWT_SECRET` are in plaintext in `backend/.env`. More urgent than any phase.
-4. **Firebase migration strategy** — full replacement vs bridge. Shapes all of Phase 2.
-5. **Candidate `source` field** — add it, or drop source-effectiveness from Phase 5.
-6. **`backend/data/uploads/*.pdf`** — real candidate resumes in the repo? Deletion needs approval.
-7. **Render persistent disk** — if unmounted, uploaded resumes are lost on every deploy.
+1. ✅ **git** — initialised on `main`; baseline commit `11383e9`. `.env` verified untracked. Commit per logical unit from Phase 1 on.
+2. ✅ **Toolchain** — Node v24.18.0 + npm 11.16.0 (already installed, was off-PATH) + yarn 1.22.22. Frontend is buildable and verifiable locally.
+3. ❌ **No key/password rotation.** Owner's explicit decision with the exposure in view. The `backend/.env` Atlas password and `JWT_SECRET` stay as-is. **Do not rotate anything.** Recorded as accepted risk in AUDIT.md §6 — do not re-litigate.
+4. ✅ **Firebase-signin bridged to the existing JWT** (not a full replacement). Firebase owns credentials, signup, password reset; the backend keeps minting/verifying its own JWTs. No forced password resets for existing users.
+5. ✅ **Add a candidate `source` field** — schema + capture UI. Phase 5 source-effectiveness is unblocked.
+6. ✅ **Keep `backend/data/uploads/*.pdf`.** No deletion.
+7. ✅ **No Render persistent disk needed** — verified by code trace (AUDIT.md §8.14). Resume text lives in MongoDB and drives every feature; PDF binaries are never read back. Two follow-on notes recorded there (a future PDF-viewer feature would need object storage; `/uploads` is an unauthenticated static mount).

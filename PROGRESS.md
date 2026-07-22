@@ -4,8 +4,46 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Phase 0 complete → awaiting go-ahead for Phase 1
+**Current phase:** Phase 0 complete, all blockers cleared → awaiting go-ahead for Phase 1
 **Last updated:** 2026-07-23
+
+---
+
+## Session 2 — 2026-07-23 — Phase 0 follow-up: blockers cleared
+
+All seven open questions answered by the owner. Setup actioned; **still no application source modified.**
+
+### Decisions recorded (see PROJECT_PLAN.md "Cross-phase decisions")
+1. ✅ git history — create it
+2. ✅ install the Node toolchain
+3. ❌ **do not rotate any existing key or password** — owner's decision, made with the exposure in view. **Accepted risk; do not re-raise.**
+4. ✅ **Firebase-signin bridged to the existing JWT** (not a full replacement)
+5. ✅ add a candidate `source` field
+6. ✅ keep `backend/data/uploads/*.pdf`
+7. ✅ resumes are DB-backed — no Render persistent disk needed
+
+### What I did
+- **`git init`** on `main` at the project root. Set local identity to `jsrrajpurohit <jsrrajpurohit@gmail.com>` (the repo's stray `.gitconfig` carried the scaffold identity `emergent-agent-e1`, which I did not use).
+- **Verified before committing that no secrets were staged** — `git status --ignored` confirms `backend/.env` and `frontend/.env` are both ignored and untracked. This matters more than usual given decision #3.
+- **Baseline commit `11383e9`** — 123 files, the app exactly as received plus the three Phase 0 audit docs. Establishes the diff baseline.
+- **Toolchain:** Node **v24.18.0** and npm **11.16.0** turned out to be already installed — they were simply absent from my shell's inherited PATH, which is why Phase 0 reported them missing. `winget` confirmed no upgrade needed. Corepack couldn't activate yarn (EPERM writing to `Program Files` — needs admin), so installed **yarn 1.22.22** via `npm i -g yarn`, matching the project's declared `packageManager` exactly.
+- **`yarn install`** run in `frontend/` — the project has **no lockfile at all** (neither `yarn.lock` nor `package-lock.json`), so this is a fresh resolution and will generate `yarn.lock`.
+- **Answered Q7 by code trace** (below).
+
+### Verified
+- **Resume storage — your read was right, no persistent disk needed.** Traced end to end: `candidates.resume_text` (the extracted text) lives in **MongoDB** and is what every feature actually consumes — AI ranking, questions, summary, compare, the `CandidateDetail` resume preview, and the admin resume list. The PDF *binary* goes to local disk with only its filename in Mongo as `pdf_path`; grepping every usage shows `pdf_path` is **written on upload and read only to delete the file** — no route or component ever serves it back. Losing the binaries on redeploy is therefore invisible today. Full detail in AUDIT.md §8.14.
+- **`.env` files are genuinely untracked** — confirmed, not assumed.
+
+### Corrections to Phase 0
+- 🔴 **Retracted: the `lodash@4.18.1` claim was wrong.** I stated that version doesn't exist and that a clean install would fail. Checked against the registry: **`4.18.1` is real and is the current latest.** No issue, and the Phase 6 task to "verify lodash" was a wasted item — narrowed to "check whether lodash is imported at all". AUDIT.md §8.3 and PROJECT_PLAN Phase 6 both corrected.
+- **Node/npm were not actually missing** — they were installed but off my shell's PATH. The Phase 0 constraint was real for my session but overstated as a machine-level absence.
+
+### New findings (logged, not fixed)
+- **`/uploads` is mounted as unauthenticated `StaticFiles`** ([server.py:67-72](backend/server.py#L67-L72)) — any PDF still on disk is fetchable by URL with no auth check. Unguessable UUIDs and nothing linking to it make this low-risk today, but it is an open PII endpoint by design. → backlog.
+- **A future PDF viewer/download is not buildable on current storage.** `PRD.md` lists "in-app PDF viewer/serving in candidate detail" as a P2 item; because binaries sit on ephemeral disk and are never served, that feature would need object storage (S3/GCS) or GridFS. → backlog.
+
+### Still to confirm
+- Whether `yarn install` succeeds cleanly and whether **react-scripts 5.0.1 builds under Node 24** (a much newer runtime than that toolchain targets). Result recorded at the next boundary.
 
 ---
 
@@ -83,14 +121,7 @@ Plus, outside the prompts: `seed.py` demo data is 100% tech/design ("TechCorp", 
 ---
 
 ### Open questions for you
-
-1. **`git init`?** No repo exists, so the "small, reviewable commits" rule can't be honoured. Shall I initialise one and commit the current state as a baseline?
-2. **Install Node 18+/yarn?** Otherwise I write frontend code unverified and you run the builds.
-3. **Rotate the Atlas password and `JWT_SECRET` now?** I'd put this ahead of all phase work.
-4. **Firebase strategy** — full replacement of bcrypt+JWT, or Firebase-signin bridged to the existing JWT? Existing bcrypt passwords **cannot** transfer to Firebase, so a full swap forces password resets for current users. Shapes all of Phase 2; I have a recommendation ready.
-5. **Add a candidate `source` field?** (unblocks Phase 5 source effectiveness)
-6. **Are `backend/data/uploads/*.pdf` real candidate resumes?** Three PDFs sit in the tree. If real, that's PII in the repo — removal needs your approval.
-7. **Is a Render persistent disk mounted for `backend/data/uploads`?** If not, uploaded resumes are silently lost on every deploy.
+*(All seven answered — see Session 2 above.)*
 
 ---
 
@@ -120,5 +151,6 @@ Logged during Phase 0, deliberately **not** fixed (no unrelated refactors). Cand
 
 **Performance** (full ranked list in AUDIT.md §8)
 - No code-splitting; jobs-list N+1 (31 queries for 30 postings — likely your reported slowness); missing indexes on `candidates.stage`/`uploaded_at`, `jobs.status`/`created_at`; render-blocking font `@import`; no memoization; unstable `AuthContext` value; boot auth waterfall; no AI result caching
-- **`lodash: "4.18.1"` does not exist** (lodash tops out at 4.17.x) — a clean install may fail outright. Verify before any dependency work
-- **Resume PDFs written to Render's ephemeral local disk** — likely silent data loss on deploy unless a disk is mounted
+- ~~`lodash: "4.18.1"` does not exist~~ — **retracted, that version is real and current.** Narrowed to: check whether `lodash` is imported at all during the Phase 6 prune
+- **`/uploads` is an unauthenticated `StaticFiles` mount** — any PDF on disk is fetchable by URL with no auth check (low risk today: unguessable UUIDs, nothing links to it)
+- **A PDF viewer/download feature isn't buildable on current storage** — binaries sit on ephemeral disk and are never served; would need S3/GCS or GridFS. (`PRD.md` lists this as a P2 backlog item)

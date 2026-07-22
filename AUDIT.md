@@ -313,7 +313,7 @@ Ranked by expected impact.
 **Frontend**
 1. **Zero code-splitting.** [App.js](frontend/src/App.js) statically imports all 12 page components including the 5 admin pages. Every HR user downloads the entire admin panel + recharts on first paint. `React.lazy` + `Suspense` is the single highest-leverage fix, and it is a **prerequisite for Phase 1** — otherwise the marketing site bloats the app bundle exactly as the brief warns.
 2. **Unused heavy dependencies shipped:** `@tanstack/react-query`, `swr` (both unused), `framer-motion`, `embla-carousel-react`, `vaul`, `react-day-picker`, `input-otp`, `cmdk`, `recharts`, plus ~40 unused shadcn components. Likely a large fraction of the bundle is dead code.
-3. **`lodash: "4.18.1"` in package.json — this version does not exist** (lodash tops out at 4.17.x). A clean `yarn install` should fail outright. Since `node_modules` is absent I could not confirm, but it needs checking before any dependency work.
+3. ~~`lodash: "4.18.1"` does not exist~~ — **retracted 2026-07-23.** Verified against the registry: `4.18.1` is real and is the current latest. No issue. (`lodash` is still worth checking for *actual use* during the Phase 6 dependency prune.)
 4. **Google Fonts `@import` at the top of [index.css](frontend/src/index.css)** — a render-blocking request that CSS `@import` makes serial. Should be a `<link rel="preconnect">` + `<link>` in `index.html`.
 5. **No `React.memo` / `useMemo`** anywhere. The Kanban board ([CandidateBoard.jsx](frontend/src/pages/CandidateBoard.jsx), 221 lines) re-renders every card on any drag/state change.
 6. **`AuthContext` value is a fresh object literal every render** ([AuthContext.jsx:45](frontend/src/context/AuthContext.jsx#L45)) → forces a re-render of every consumer on any parent render.
@@ -326,7 +326,10 @@ Ranked by expected impact.
 11. **Full-collection scans in the admin panel** — `_enrich_users()` and `/admin/analytics` pull **every** job, candidate and AI log into Python memory (`.to_list(100000)`) and aggregate with `Counter`. Fine at demo scale, falls over as the platform grows. PRD.md already acknowledges this.
 12. **Missing indexes.** [database.py:26-32](backend/database.py#L26-L32) indexes `users.email`, `jobs.user_id`, `candidates.job_id`, etc. — but **nothing on `candidates.stage`, `candidates.uploaded_at`, `jobs.status`, or `jobs.created_at`**, all of which the dashboard/reports filter and sort on.
 13. **AI results are never cached.** Re-ranking re-calls Groq for every candidate; only `reanalyze=False` + a `analyzed_at: None` filter prevents repeat work, and there is no content-hash check — an unchanged JD still costs a full re-run.
-14. **Resume PDFs are stored on the local Render filesystem** (`backend/data/uploads/`). Render's disk is **ephemeral** — uploaded resumes are **silently lost on every deploy/restart** unless a persistent disk is mounted. Worth confirming; if unmounted this is data loss, not just performance.
+14. **Resume storage — resolved 2026-07-23. No persistent disk needed; your read was right.** Traced end to end:
+    - **The extracted resume *text* lives in MongoDB** (`candidates.resume_text`, written at [routes_candidates.py:85](backend/routes_candidates.py#L85)). **Every feature that matters reads from there** — AI ranking, questions, summary, compare, the resume preview in [CandidateDetail.jsx:126](frontend/src/pages/CandidateDetail.jsx#L126) (renders `cand.resume_text`), and the admin resume list. **Nothing breaks on a deploy.**
+    - **The PDF *binary* is written to the local disk** (`UPLOAD_DIR / {uuid}.pdf`) and only the filename is kept in Mongo as `pdf_path`. Grepped every usage: `pdf_path` is written on upload and read **only** to `os.remove()` the file on candidate deletion. **No route, page or component ever serves or reads it back.** So the binaries are effectively write-only, and losing them on redeploy is currently invisible.
+    - ⚠️ **Two consequences to note, neither urgent:** (a) `PRD.md` lists *"in-app PDF viewer/serving in candidate detail"* as a P2 backlog item — that feature **cannot be built on the current storage** and would need object storage (S3/GCS) or GridFS, not a Render disk. (b) [server.py:67-72](backend/server.py#L67-L72) mounts `/uploads` as **unauthenticated `StaticFiles`** — any PDF still on disk is fetchable by URL with no auth check. Unguessable UUIDs make this low-risk today and nothing links to it, but it is an open PII endpoint by design.
 
 ---
 
@@ -371,15 +374,17 @@ Ranked by expected impact.
 
 ---
 
-## 11. Open questions for you (blocking or near-blocking)
+## 11. Open questions — ANSWERED 2026-07-23
 
-1. **`git init`?** There's no repo, so no commits are possible. Shall I initialise one, add a first commit of the current state as a baseline, and commit per logical unit from Phase 1 onward? (I won't touch git without your say-so.)
-2. **Node/npm are not installed here.** Without them I cannot build, run, or verify the frontend — I'd be writing code unverified. Can you install Node 18+/yarn, or should I proceed code-only and have you run the builds on your side?
-3. **Secrets rotation (§6)** — do you want to rotate the Atlas password + `JWT_SECRET` now? I'd treat this as more urgent than any phase.
-4. **Firebase migration strategy (§10, Phase 2)** — full replacement of bcrypt/JWT, or Firebase-for-signin bridged to your existing JWT? Existing users' bcrypt passwords do not transfer to Firebase, so a full swap means **existing accounts need a password reset**. I have a recommendation; flagging now because it shapes all of Phase 2.
-5. **Candidate `source` field (§4)** — add it (schema + capture UI) so Phase 5 can do source effectiveness, or drop that metric from scope?
-6. **`backend/data/uploads/*.pdf`** — are those real candidate resumes? If so they should come out of the repo (deletion needs your approval per the rules).
-7. **Render persistent disk (§8.14)** — is a disk mounted for `backend/data/uploads`? If not, uploaded resumes are being lost on deploy.
+| # | Question | Decision |
+|---|---|---|
+| 1 | `git init`? | ✅ **Yes.** Done — repo initialised on `main`, baseline commit `11383e9`. `.env` files verified untracked. |
+| 2 | Install Node? | ✅ **Yes.** Node v24.18.0 + npm 11.16.0 were already on the machine (just off my shell's PATH); yarn 1.22.22 installed to match `packageManager`. Frontend is now buildable/verifiable. |
+| 3 | Rotate Atlas password + `JWT_SECRET`? | ❌ **No — do not rotate any existing key or password.** Owner's decision, made with the §6 exposure in view. §6 stays on record as a known accepted risk; I will not rotate anything. |
+| 4 | Firebase migration strategy? | ✅ **Firebase-signin bridged to the existing JWT.** Firebase handles credentials/signup/reset; the backend continues to mint and verify its own JWTs. Avoids forcing password resets on existing users. |
+| 5 | Candidate `source` field? | ✅ **Add it.** Schema + capture UI. Unblocks Phase 5 source-effectiveness analytics. |
+| 6 | Remove `backend/data/uploads/*.pdf`? | ❌ **Keep the files.** No deletion. |
+| 7 | Render persistent disk? | ✅ **Not needed — confirmed by code trace.** See §8.14: resume *text* is in MongoDB and drives every feature; the PDF binaries on disk are never read back. Two follow-on notes recorded there. |
 
 ---
 
