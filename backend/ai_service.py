@@ -84,14 +84,29 @@ async def log_usage(action: str, user_id: str = None, job_id: str = None, candid
 # not add, rename or remove a key without checking the components that read it.
 
 UNIVERSAL_CONTEXT = (
-    "This platform is used to hire for every kind of work: clinical and care roles, "
-    "skilled trades, warehouse and logistics, manufacturing, transport and driving, "
-    "hospitality and food, retail, education, field service, agriculture, security, "
-    "public sector, seasonal and gig work, as well as office, creative and technical "
-    "roles. Never assume an office or corporate setting. Work out from the job "
-    "description what kind of work this actually is, and apply the norms, vocabulary "
-    "and hiring standards of that occupation."
+    "This platform hires for every kind of work, in every industry, anywhere in the world — "
+    "including roles and job families you may rarely see described. Never assume an office "
+    "or corporate setting, a particular country's hiring conventions, or a familiar job "
+    "family. The job description in front of you is the sole authority on what this role is "
+    "and on what good looks like in it. Derive your evaluation criteria from that "
+    "description; never apply a template carried over from a different role or industry."
 )
+
+# The core of the JD-driven architecture. Every evaluative prompt asks the model
+# to derive a role profile FIRST, then judge against that profile — so criteria
+# come from the posting rather than from a fixed taxonomy of job types. Adding a
+# new industry requires no code change: the description drives everything.
+JD_ANALYSIS_DIRECTIVE = """Before evaluating anything, derive a role profile from the job description itself:
+
+1. DOMAIN — the industry, field or sector this belongs to, and the norms and vocabulary that apply within it.
+2. FUNCTION — what this person actually does day to day, and what separates an adequate performer from an excellent one in this specific job.
+3. SENIORITY — the level being hired at, and what is genuinely reasonable to expect of a candidate at that level.
+4. ENGAGEMENT — whether this is permanent, fixed-term, contract, agency, locum, freelance, seasonal, shift-based, casual or project work, and what tenure and mobility patterns are normal for that arrangement in this field.
+5. HARD REQUIREMENTS — licences, certifications, registrations, clearances, professional memberships, qualifications or legal eligibility that are mandatory rather than merely desirable.
+6. TOOLS & SYSTEMS — the equipment, software, machinery, platforms, methodologies, frameworks or standards the description names.
+7. CONTEXT — working environment, physical or cognitive demands, regulatory, safety or compliance obligations, customer/patient/client exposure, travel, and location or right-to-work constraints.
+
+Derive every one of these from the description in front of you. Where it is thin, infer what is reasonable for that specific role rather than importing assumptions from an unrelated field. Then apply the profile you derived — not a generic scoring template — for the rest of this task."""
 
 RANK_SYSTEM = (
     "You are an expert recruiter and resume screener who assesses candidates for any "
@@ -110,10 +125,12 @@ def build_rank_prompt(jd_text: str, candidates_batch: list) -> str:
     cands = "\n\n".join(cand_blocks)
     return f"""Evaluate each candidate against the JOB DESCRIPTION below.
 
-First work out what kind of role this is: the occupation, the setting, the seniority, and
-what actually determines whether someone succeeds in it. Then judge every candidate by that
-standard. What makes a strong ICU nurse, a strong forklift operator and a strong backend
-engineer are completely different things, and each should be assessed on its own terms.
+{JD_ANALYSIS_DIRECTIVE}
+
+Weight your scoring according to the profile you derived. Whatever most determines success
+in this particular role should carry the most weight — that will be different for every
+posting, and you should let the description tell you what it is here rather than applying a
+fixed set of criteria.
 
 JOB DESCRIPTION:
 {jd_text[:6000]}
@@ -123,20 +140,27 @@ CANDIDATES:
 
 For EACH candidate return an object with:
 - id: the candidate id exactly as given
-- score: integer 0-100, measured against the requirements of THIS role only. Do not reward
-  credentials the role does not ask for, and do not penalise a candidate for lacking them.
-- summary: 2-3 sentence assessment in plain, concrete language
-- matched_skills: array of strings — skills, certifications, licences, tickets, equipment,
-  systems or practical capabilities the candidate has that this role calls for
-- missing_skills: array of strings — requirements of this role the candidate does not
-  evidence, including any mandatory licence or certification they appear to lack
-- red_flags: array of strings, or [] if none. Only raise genuine, evidence-based concerns
-  for THIS occupation: a missing legally-required licence or certification, an unexplained
-  gap, experience clearly below what the role requires, or a contradiction in the resume.
-  Do NOT treat short tenures or frequent job changes as a concern in fields where they are
-  normal — agency, locum, seasonal, temporary, contract, hospitality, construction, events
-  and gig work all routinely involve short engagements. Mention tenure only where it would
-  genuinely be considered unusual within this specific occupation.
+- score: integer 0-100 against the profile you derived, and nothing else. Do not reward
+  credentials, seniority or prestige the role did not ask for, and do not penalise their
+  absence. A candidate who meets this role's stated requirements scores well even if their
+  background would be unremarkable for a different role.
+- summary: 2-3 sentence assessment in plain, concrete language, using the vocabulary of
+  this role's own field
+- matched_skills: array of strings — whatever this role actually calls for that the
+  candidate evidences: skills, licences, certifications, registrations, tools, systems,
+  equipment, domain knowledge, methodologies or practical capabilities
+- missing_skills: array of strings — requirements from the profile the candidate does not
+  evidence. List anything you identified as a HARD REQUIREMENT first, since a missing
+  mandatory credential usually matters more than a missing preference.
+- red_flags: array of strings, or [] if none. Raise only substantive, evidence-based
+  concerns measured against the profile: a missing mandatory credential, an unexplained
+  gap, experience clearly short of the stated level, or a contradiction in the resume.
+  Judge tenure against the ENGAGEMENT norms you derived, never against a general preference
+  for long service. Frequent moves are expected and unremarkable in contract, agency,
+  locum, freelance, seasonal, project and shift-based work, and carry no signal there. The
+  same pattern may be worth noting in a role whose description implies long-horizon
+  ownership or succession. Apply whichever standard genuinely fits this posting, and say
+  nothing about tenure where it is not meaningful.
 
 Return ONLY a JSON array of these objects. No prose, no markdown."""
 
@@ -144,19 +168,22 @@ Return ONLY a JSON array of these objects. No prose, no markdown."""
 QUESTIONS_SYSTEM = (
     "You are an expert interviewer who writes sharp, role-specific screening questions. "
     + UNIVERSAL_CONTEXT
-    + " You ask what a seasoned hiring manager in that particular trade or profession "
-    "would actually ask."
+    + " You ask what an experienced hiring manager working in that particular field would "
+    "actually ask, in that field's own language."
 )
 
 
 def build_questions_prompt(jd_text: str, candidate: dict) -> str:
     return f"""Based on this job description and candidate resume, generate 6-8 tailored screening questions.
 
-First work out what kind of role this is and what genuinely needs checking before hiring
-someone into it. Let that drive the questions. A ward nurse should be asked about clinical
-judgement, escalation and shift patterns; a forklift operator about certification currency,
-load safety and warehouse systems; an engineer about technical depth and trade-offs; a chef
-about service volume, food safety and kitchen pressure. Ask what matters for THIS job.
+{JD_ANALYSIS_DIRECTIVE}
+
+Now decide what genuinely needs verifying before hiring this specific candidate into this
+specific role, and let that decide the mix of questions. The right areas to probe come from
+the profile you derived — the hard requirements that must be confirmed, the parts of the
+function where competence separates candidates, the risks or obligations the context
+creates, and anything in the resume that needs clarifying. Do not work from a standard
+interview template, and do not force a fixed balance of question categories.
 
 JOB DESCRIPTION:
 {jd_text[:4000]}
@@ -165,15 +192,15 @@ CANDIDATE RESUME:
 {candidate.get('resume_text','')[:4000]}
 
 Return ONLY a JSON array of objects, each with:
-- type: a short category label that fits this role. Pick whichever genuinely applies, for
-  example: "Technical", "Practical Skills", "Safety", "Certification", "Compliance",
-  "Experience", "Situational", "Behavioral", "Availability", "Customer Interaction",
-  "Physical Requirements", "Team Fit". Use a different short label if none of these fit
-  the occupation well.
+- type: a short free-form category label, two or three words at most, describing what the
+  question probes, phrased in the vocabulary of THIS role's field. Derive the labels from
+  the role rather than choosing from a fixed list — a regulated profession, a machine
+  operator role, a client-facing commercial role and a research role should all produce
+  visibly different labels. Reuse a label across questions where they probe the same area.
 - question: the question text, specific to this candidate's background and this role
 
-Ground the questions in what the resume actually says wherever you can, rather than asking
-generically. No prose, no markdown."""
+Ground each question in something the job description or the resume actually says, rather
+than asking generically. No prose, no markdown."""
 
 
 ENHANCE_SYSTEM = (
@@ -187,22 +214,22 @@ ENHANCE_SYSTEM = (
 def build_enhance_prompt(jd_text: str, title: str) -> str:
     return f"""Improve and professionally format the following job posting for the role "{title}".
 
-First work out what kind of role this is and who will be reading the advert. Then choose the
-sections that genuinely belong in a posting for THAT job, and leave out the ones that do not.
-Depending on the role, useful sections include: Overview, Responsibilities, Requirements,
-Certifications & Licences Required, Shift Pattern & Hours, Pay & Rate, Location / Site,
-Physical Requirements, Equipment & Tools, Training Provided, Career Progression,
-Nice to have, Benefits, and How to Apply.
+{JD_ANALYSIS_DIRECTIVE}
 
-Include a section only where the original gives you something real to put in it. A warehouse
-or care posting usually needs shifts, pay basis and site; a licensed trade or clinical role
-needs its certifications stated plainly; a salaried professional role may need none of those.
-Do not force every role into the same shape.
+Now decide the structure this particular posting needs, and build it from the profile you
+derived rather than from a standard layout. Every section you include must earn its place:
+include one only where the original gives you something real to put in it, and where a
+candidate for THIS role would actually look for that information before applying.
 
-Write plainly. Avoid corporate filler and unexplained jargon. Use inclusive language, and do
-not state requirements the original does not support. Keep it truthful to the input — never
-invent specifics such as salary figures, shift times, locations or benefits that are not
-already there or clearly implied.
+What matters most differs sharply by role and by field — a posting whose candidates need to
+check working patterns, pay basis, site, mandatory credentials, equipment or physical
+demands before applying should lead with those, while another may need none of them and
+should not be padded with empty headings. Let the description and the audience decide.
+
+Write in the register that role's candidates expect. Avoid corporate filler and unexplained
+jargon, keep the language inclusive, and do not state requirements the original does not
+support. Never invent specifics — pay figures, working hours, locations, benefits or
+credentials that are not already present or clearly implied.
 
 ORIGINAL JOB POSTING:
 {jd_text[:6000]}
@@ -228,11 +255,12 @@ JOB DESCRIPTION (for context on the role and the right tone):
 
     return f"""Draft a {email_type} email to this candidate.
 
-First work out what kind of role this is and pitch the message accordingly. A message about
-a warehouse shift, a nursing post and a senior engineering role should not read the same
-way. Match the formality the reader would expect, keep it short enough to read on a phone,
-and use plain everyday language rather than corporate phrasing. Be warm and respectful in
-every case — especially in a rejection, where brevity and clarity are kinder than padding.
+Work out from the role and the description below what register this reader expects, and
+pitch the message to that. Formality, length, technical vocabulary and how much context to
+give all vary by field, seniority and engagement type — infer them rather than defaulting to
+one house style. Keep it short enough to read on a phone, use plain language over corporate
+phrasing, and be warm and respectful throughout. In a rejection, brevity and clarity are
+kinder than padding.
 
 Candidate name: {candidate.get('name') or 'Candidate'}
 Role: {job_title}
@@ -260,10 +288,11 @@ COMPARE_SYSTEM = (
 def build_compare_prompt(jd_text: str, cand_a: dict, cand_b: dict) -> str:
     return f"""Compare these two candidates for the role.
 
-Work out first what this role really demands day to day, then weigh the two candidates on
-that basis rather than on general prestige. Reliability, certification currency, physical
-capability, availability or customer manner may matter far more than seniority or education
-depending on the job.
+{JD_ANALYSIS_DIRECTIVE}
+
+Weigh the two candidates on the factors your profile says actually predict success here,
+not on general prestige, seniority or education. Which factors those are differs completely
+between roles, so let the description decide rather than applying a standard hierarchy.
 
 JOB DESCRIPTION:
 {jd_text[:4000]}
@@ -293,8 +322,7 @@ SUMMARY_SYSTEM = (
 def build_summary_prompt(jd_text: str, candidate: dict) -> str:
     return f"""Write a deep candidate analysis for this person against the role.
 
-Work out what kind of role this is first, and assess the candidate by the standards of that
-occupation rather than a generic professional template.
+{JD_ANALYSIS_DIRECTIVE}
 
 JOB DESCRIPTION:
 {jd_text[:4000]}
@@ -303,11 +331,13 @@ CANDIDATE RESUME:
 {candidate.get('resume_text','')[:5000]}
 
 Return ONLY a JSON object with:
-- overall_fit: 1-2 sentence verdict
-- strengths: array of strings, relevant to what this role actually needs
-- concerns: array of strings. Raise only substantive concerns for this occupation. Do not
-  treat short tenures or frequent moves as a concern in fields where they are normal
-  (agency, locum, seasonal, temporary, contract, hospitality, construction, events, gig).
+- overall_fit: 1-2 sentence verdict against the profile you derived
+- strengths: array of strings, limited to what genuinely matters for this role
+- concerns: array of strings. Raise only substantive concerns measured against the profile.
+  Judge tenure against the ENGAGEMENT norms you derived rather than a general preference for
+  long service: frequent moves carry no signal in contract, agency, locum, freelance,
+  seasonal, project or shift-based work, and may carry some in a role whose description
+  implies long-horizon ownership. Say nothing about tenure where it is not meaningful here.
 - experience_highlights: array of strings
 - recommendation: one of "Strong Yes", "Yes", "Maybe", "No"
 
@@ -317,8 +347,9 @@ No prose, no markdown."""
 HEALTH_SYSTEM = (
     "You are an expert hiring operations analyst who reviews pipeline health. "
     + UNIVERSAL_CONTEXT
-    + " Hiring volume, speed and drop-off look very different for high-volume shift "
-    "recruitment than for a single specialist vacancy — read the numbers accordingly."
+    + " Healthy volume, speed and drop-off differ by orders of magnitude between hiring "
+    "patterns — infer from the data which kind of hiring this is before judging whether the "
+    "numbers are good or bad, rather than applying a single benchmark."
 )
 
 

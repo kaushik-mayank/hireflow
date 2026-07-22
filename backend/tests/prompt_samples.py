@@ -10,14 +10,22 @@ actually calling Groq, which needs a working key.
 
 Output is markdown, ready to paste into PROGRESS.md for review.
 
+The three roles below are regression baselines. Add your own by appending to
+ROLES — the prompts derive their criteria from the description, so no code
+anywhere needs to know about a new industry.
+
 What to look for when reading the results:
   * The forklift candidate has three short agency placements. Under the old
-    prompt that produced a "job hopping" red flag. It must not now.
-  * Screening question `type` labels should differ by trade — Safety and
-    Certification for the warehouse role, Technical for the engineer.
-  * The enhanced nursing and warehouse postings should carry shift, licence
-    and site sections; the engineering one should not be forced to.
-  * The rejection emails should not all read in the same corporate register.
+    prompt that produced a "job hopping" red flag. It must not now — and the
+    reasoning should reference the engagement type, not a hardcoded exemption.
+  * Screening question `type` labels should be visibly different per role and
+    phrased in that field's own vocabulary, not drawn from a fixed set.
+  * Each enhanced posting should carry the sections its own candidates would
+    look for, and omit ones the source gives nothing to fill.
+  * The rejection emails should not all read in the same register.
+  * Scores should reflect each role's stated requirements — the engineer being
+    marked down against a 4-year bar is correct; a licensed-trade candidate
+    should not be penalised for lacking a degree nobody asked for.
 """
 
 import asyncio
@@ -46,6 +54,10 @@ if "database" not in sys.modules:
 import ai_service as ai  # noqa: E402
 
 
+# These three are REGRESSION BASELINES, not the supported set. The prompts are
+# JD-driven: nothing in the codebase special-cases an industry, so adding a role
+# here needs only a description and a resume — no code changes anywhere.
+# test_prompts.py exercises eleven industries offline for the same reason.
 ROLES = [
     {
         "key": "ICU Registered Nurse",
