@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Mail, Phone, ChevronDown, ChevronUp, Sparkles, FileText, GitCompare, MessageSquareText, Send, XCircle } from "lucide-react";
 import { candidatesApi, aiApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
-import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Modal, Spinner, Skeleton } from "@/components/ui";
+import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Modal, Spinner, Skeleton, SourceBadge } from "@/components/ui";
 import { STAGES, fmtDate } from "@/constants";
 import { toast } from "sonner";
 
@@ -111,9 +111,10 @@ export default function CandidateDetail() {
                 <Avatar name={cand.name} size={56} />
                 <div className="flex-1">
                   <h2 className="text-xl font-semibold text-gray-800">{cand.name}</h2>
-                  <div className="flex flex-wrap gap-3 mt-1.5 text-sm text-gray-600">
+                  <div className="flex flex-wrap items-center gap-3 mt-1.5 text-sm text-gray-600">
                     {cand.email && <span className="flex items-center gap-1"><Mail size={14} /> {cand.email}</span>}
                     {cand.phone && <span className="flex items-center gap-1"><Phone size={14} /> {cand.phone}</span>}
+                    <SourceBadge source={cand.source} />
                   </div>
                   <button onClick={() => navigate(`/jobs/${cand.job_id}`)} className="text-sm text-indigo hover:underline mt-2">{cand.job?.title}</button>
                 </div>

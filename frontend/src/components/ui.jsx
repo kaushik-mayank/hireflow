@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { X, Loader2, Sparkles } from "lucide-react";
 import { STAGE_COLORS, scoreColor, initials } from "@/constants";
+import { sourceMeta } from "@/config/sources";
 
 export function Button({ variant = "primary", className = "", children, ...props }) {
   const base =
@@ -156,6 +157,23 @@ export function EmptyState({ icon: Icon, title, subtitle, action }) {
 
 export function Skeleton({ className = "" }) {
   return <div className={`skeleton ${className}`} />;
+}
+
+// Small badge showing where a candidate came from. Reads its icon/colour from
+// the single sources config so it stays consistent everywhere it's used.
+export function SourceBadge({ source, className = "" }) {
+  if (!source) return null;
+  const meta = sourceMeta(source);
+  const Icon = meta.icon;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${className}`}
+      style={{ background: `${meta.color}14`, color: meta.color }}
+      title={`Source: ${meta.label}`}
+    >
+      <Icon size={11} /> {meta.label}
+    </span>
+  );
 }
 
 export function ProgressBar({ value, max, color = "#16a34a" }) {

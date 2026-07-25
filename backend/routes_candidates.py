@@ -18,9 +18,10 @@ STAGES = [
 ]
 HIRED_STAGE = "Selected"
 
-# Where a candidate came from. Free text so any channel works — job boards,
-# agencies, referrals, walk-ins, notice boards, WhatsApp groups — but the UI
-# offers these as quick picks. Reports group by whatever value is stored.
+# Where a candidate came from. Now mandatory at upload: the canonical list lives
+# in the frontend config (src/config/sources.js), and the value chosen there is
+# stored here and grouped on in Reports. "Unknown" is retained only for records
+# created before the field became mandatory.
 UNKNOWN_SOURCE = "Unknown"
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
@@ -59,12 +60,17 @@ def guess_name(text: str, filename: str) -> str:
 async def upload_resumes(
     job_id: str,
     files: list[UploadFile] = File(...),
-    source: str = Form(UNKNOWN_SOURCE),
+    source: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
     job = await jobs.find_one({"id": job_id, "user_id": user["id"]}, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Source is mandatory (the UI enforces it too); reject a blank value.
+    clean_source = (source or "").strip()
+    if not clean_source:
+        raise HTTPException(status_code=400, detail="A candidate source is required")
 
     created = []
     for f in files:
@@ -91,7 +97,7 @@ async def upload_resumes(
             "resume_text": text or "(Could not extract text from PDF)",
             "pdf_path": stored_name,
             "pdf_original_name": f.filename,
-            "source": (source or "").strip() or UNKNOWN_SOURCE,
+            "source": clean_source,
             "stage": "Applied",
             "ai_score": None,
             "ai_summary": None,

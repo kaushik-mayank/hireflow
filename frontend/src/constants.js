@@ -28,20 +28,8 @@ export const STAGE_COLORS = {
   "On Hold": { bg: "#ffedd5", color: "#7c2d12" },
 };
 
-/** Quick picks for the upload source field. Free text is allowed — these are
- *  only suggestions, and are deliberately broad rather than office-centric. */
-export const SOURCE_SUGGESTIONS = [
-  "Job board",
-  "Careers page",
-  "Referral",
-  "Agency",
-  "Recruiter outreach",
-  "Walk-in",
-  "Social media",
-  "Job centre",
-  "Notice board",
-  "Returning applicant",
-];
+// Candidate sources moved to src/config/sources.js — the single source of truth
+// for the mandatory upload dropdown, the badge and the filter.
 
 export function scoreColor(score) {
   if (score == null) return { bg: "#f3f4f6", color: "#9ca3af" };

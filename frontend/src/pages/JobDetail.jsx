@@ -3,8 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Upload, Sparkles, LayoutGrid, FileText, Activity, Search, Trash2, Eye, ArrowRight, CheckSquare } from "lucide-react";
 import { jobsApi, candidatesApi, aiApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
-import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Skeleton, EmptyState, Spinner } from "@/components/ui";
-import { STAGES, fmtDate, SOURCE_SUGGESTIONS } from "@/constants";
+import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Skeleton, EmptyState, Spinner, SourceBadge } from "@/components/ui";
+import { STAGES, fmtDate } from "@/constants";
+import { CANDIDATE_SOURCES } from "@/config/sources";
 import { toast } from "sonner";
 
 export default function JobDetail() {
@@ -25,6 +26,7 @@ export default function JobDetail() {
   // candidate filters
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
   const [minScore, setMinScore] = useState(0);
   const [sortBy, setSortBy] = useState("score");
   const [selected, setSelected] = useState([]);
@@ -49,6 +51,11 @@ export default function JobDetail() {
   }, [tab, id]);
 
   const handleFiles = async (fileList) => {
+    // Source is mandatory — block the upload until one is chosen.
+    if (!source) {
+      toast.error("Please choose where these candidates came from before uploading");
+      return;
+    }
     const files = Array.from(fileList).filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
     if (files.length === 0) {
       toast.error("Only PDF files are accepted");
@@ -109,8 +116,9 @@ export default function JobDetail() {
   let view = cands.filter((c) => {
     const okSearch = (c.name || "").toLowerCase().includes(search.toLowerCase());
     const okStage = stageFilter === "all" || c.stage === stageFilter;
+    const okSource = sourceFilter === "all" || c.source === sourceFilter;
     const okScore = (c.ai_score ?? 0) >= minScore;
-    return okSearch && okStage && okScore;
+    return okSearch && okStage && okSource && okScore;
   });
   view.sort((a, b) => {
     if (sortBy === "score") return (b.ai_score ?? -1) - (a.ai_score ?? -1);
@@ -142,6 +150,25 @@ export default function JobDetail() {
               {analyzing ? "Analyzing..." : "Analyze All Candidates"}
             </AIButton>
           </div>
+
+          {/* Mandatory: chosen before upload and applied to every file in the
+              batch, so Reports/analytics group candidates by a real source. */}
+          <div className="mb-3">
+            <label htmlFor="upload-source" className="text-xs font-medium text-gray-700">
+              Candidate source <span className="text-coral">*</span>
+            </label>
+            <select
+              id="upload-source"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              className={`mt-1 block w-full sm:w-72 rounded-lg border px-3 py-2 text-sm bg-white outline-none focus:border-indigo focus:ring-2 focus:ring-indigo/20 ${source ? "border-gray-200" : "border-coral/60"}`}
+              data-testid="upload-source"
+            >
+              <option value="" disabled>Select where they came from…</option>
+              {CANDIDATE_SOURCES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+
           <div
             className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${dragOver ? "border-indigo bg-indigo-light/40" : "border-gray-200 hover:border-indigo/50"}`}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -154,27 +181,6 @@ export default function JobDetail() {
             {uploading ? <Spinner size={22} className="mx-auto text-indigo" /> : <Upload size={22} className="mx-auto text-gray-400" />}
             <p className="text-sm text-gray-700 mt-2 font-medium">{uploading ? "Uploading..." : "Drop PDF resumes here or click to browse"}</p>
             <p className="text-xs text-gray-400 mt-1">Multiple PDFs · max 5MB each</p>
-          </div>
-
-          {/* Applied to everything uploaded in this batch, so Reports can show
-              which channels actually convert. Free text — any channel works. */}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <label htmlFor="upload-source" className="text-xs font-medium text-gray-700">
-              Where did these candidates come from?
-            </label>
-            <input
-              id="upload-source"
-              list="source-suggestions"
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder="Unknown"
-              className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm outline-none focus:border-indigo focus:ring-2 focus:ring-indigo/20"
-              data-testid="upload-source"
-            />
-            <datalist id="source-suggestions">
-              {SOURCE_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
-            </datalist>
-            <span className="text-xs text-gray-400">Optional — powers source reporting</span>
           </div>
         </Card>
 
@@ -197,6 +203,10 @@ export default function JobDetail() {
               <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white outline-none" data-testid="cand-stage-filter">
                 <option value="all">All Stages</option>
                 {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white outline-none" data-testid="cand-source-filter">
+                <option value="all">All Sources</option>
+                {CANDIDATE_SOURCES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 Min score <input type="range" min="0" max="100" value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} className="accent-indigo" data-testid="cand-score-slider" /> <span className="w-7 font-medium">{minScore}</span>
@@ -238,7 +248,8 @@ export default function JobDetail() {
                         </button>
                         <ScoreBadge score={c.ai_score} />
                       </div>
-                      <div className="flex flex-wrap gap-1 mt-1">
+                      <div className="flex flex-wrap items-center gap-1 mt-1">
+                        <SourceBadge source={c.source} />
                         {(c.matched_skills || []).slice(0, 2).map((s) => <Pill key={s} tone="green">{s}</Pill>)}
                         {(c.missing_skills || []).slice(0, 1).map((s) => <Pill key={s} tone="red">{s}</Pill>)}
                       </div>
