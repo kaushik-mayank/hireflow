@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Mail, Phone, ChevronDown, ChevronUp, Sparkles, FileText, GitCompare, MessageSquareText, Send, XCircle, Linkedin, Github, Link as LinkIcon } from "lucide-react";
+import { ArrowLeft, Mail, Phone, ChevronDown, ChevronUp, Sparkles, FileText, GitCompare, MessageSquareText, Send, XCircle, Linkedin, Github, Link as LinkIcon, LayoutTemplate, Printer } from "lucide-react";
 import { candidatesApi, aiApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Modal, Spinner, Skeleton, SourceBadge } from "@/components/ui";
+import ResumeView from "@/components/ResumeView";
 import { STAGES, fmtDate } from "@/constants";
 import { toast } from "sonner";
 
@@ -23,6 +24,27 @@ export default function CandidateDetail() {
   const [compare, setCompare] = useState(null);
   const [loadingAction, setLoadingAction] = useState("");
   const [compareModal, setCompareModal] = useState(false);
+
+  // Formatted resume viewer. The structured data is generated once by the AI and
+  // cached server-side, so it is only fetched the first time it's opened.
+  const [structured, setStructured] = useState(null);
+  const [structuring, setStructuring] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+
+  const openResumeView = async () => {
+    setViewerOpen(true);
+    if (structured || structuring) return;
+    setStructuring(true);
+    try {
+      const r = await aiApi.structure(id);
+      setStructured(r.data.structured);
+    } catch (err) {
+      toast.error(apiErr(err, "Could not build the formatted resume"));
+      setViewerOpen(false);
+    } finally {
+      setStructuring(false);
+    }
+  };
 
   // Inline AI panels render further down the page, so after generation we scroll
   // to the new content and briefly highlight it — otherwise there is no visual
@@ -161,10 +183,15 @@ export default function CandidateDetail() {
 
             {/* Resume preview */}
             <Card className="p-5">
-              <button onClick={() => setResumeOpen(!resumeOpen)} className="flex items-center justify-between w-full" data-testid="resume-toggle">
-                <span className="font-semibold text-gray-800 flex items-center gap-2"><FileText size={16} /> Resume {cand.pdf_original_name && <span className="text-xs text-gray-400 font-normal">({cand.pdf_original_name})</span>}</span>
-                {resumeOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-              </button>
+              <div className="flex items-center justify-between gap-3">
+                <button onClick={() => setResumeOpen(!resumeOpen)} className="flex items-center gap-2 font-semibold text-gray-800" data-testid="resume-toggle">
+                  <FileText size={16} /> Resume {cand.pdf_original_name && <span className="text-xs text-gray-400 font-normal">({cand.pdf_original_name})</span>}
+                  {resumeOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+                <Button variant="secondary" className="!py-1.5 !px-3 !text-xs" onClick={openResumeView} data-testid="resume-formatted">
+                  <LayoutTemplate size={14} /> Formatted view
+                </Button>
+              </div>
               {resumeOpen && <pre className="mt-4 whitespace-pre-wrap font-mono text-xs text-gray-600 leading-relaxed max-h-96 overflow-y-auto bg-gray-50 rounded-lg p-4">{cand.resume_text}</pre>}
             </Card>
 
@@ -250,6 +277,38 @@ export default function CandidateDetail() {
           </div>
         </div>
       </PageBody>
+
+      {/* Formatted resume viewer (on-screen). */}
+      <Modal
+        open={viewerOpen}
+        onClose={() => setViewerOpen(false)}
+        title="Formatted Resume"
+        width="max-w-3xl"
+        footer={structured && (
+          <Button onClick={() => window.print()} data-testid="resume-print">
+            <Printer size={15} /> Print / Save PDF
+          </Button>
+        )}
+      >
+        {structuring ? (
+          <div className="flex flex-col items-center gap-3 py-12">
+            <Spinner size={24} className="text-indigo" />
+            <p className="text-sm text-gray-500">Building a clean, formatted view…</p>
+          </div>
+        ) : structured ? (
+          <ResumeView data={structured} />
+        ) : (
+          <p className="text-sm text-gray-500 py-8 text-center">Could not build the formatted resume.</p>
+        )}
+      </Modal>
+
+      {/* Hidden clone used only for printing, so "Save as PDF" outputs just the
+          resume regardless of the modal chrome around it. */}
+      {structured && (
+        <div className="print-only">
+          <ResumeView data={structured} />
+        </div>
+      )}
 
       {/* Email modal — fully editable so the recruiter can tweak the draft
           before copying. Fields are controlled, so the copied text reflects

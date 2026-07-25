@@ -5,9 +5,63 @@ from database import jobs, candidates
 from auth import get_current_user
 from models import (
     RankRequest, EnhanceJDRequest, QuestionsRequest,
-    EmailRequest, CompareRequest, SummaryRequest,
+    EmailRequest, CompareRequest, SummaryRequest, StructureRequest,
 )
 import ai_service as ai
+
+
+def _as_list(value) -> list:
+    if isinstance(value, list):
+        return [v for v in value if v not in (None, "")]
+    return []
+
+
+def _normalize_structure(parsed: dict, cand: dict) -> dict:
+    """Coerce the model's JSON into a stable shape the viewer can rely on, and
+    backfill contact + links from what the parser already extracted."""
+    parsed = parsed if isinstance(parsed, dict) else {}
+    contact = parsed.get("contact") if isinstance(parsed.get("contact"), dict) else {}
+
+    experience = []
+    for e in _as_list(parsed.get("experience")):
+        if isinstance(e, dict):
+            experience.append({
+                "title": str(e.get("title") or ""),
+                "organization": str(e.get("organization") or ""),
+                "dates": str(e.get("dates") or ""),
+                "location": str(e.get("location") or ""),
+                "highlights": [str(h) for h in _as_list(e.get("highlights"))],
+            })
+
+    education = []
+    for e in _as_list(parsed.get("education")):
+        if isinstance(e, dict):
+            education.append({
+                "qualification": str(e.get("qualification") or ""),
+                "institution": str(e.get("institution") or ""),
+                "dates": str(e.get("dates") or ""),
+            })
+
+    return {
+        "name": str(parsed.get("name") or cand.get("name") or ""),
+        "headline": str(parsed.get("headline") or ""),
+        "contact": {
+            "email": str(contact.get("email") or cand.get("email") or ""),
+            "phone": str(contact.get("phone") or cand.get("phone") or ""),
+            "location": str(contact.get("location") or ""),
+        },
+        "links": {
+            "linkedin": cand.get("linkedin") or "",
+            "github": cand.get("github") or "",
+            "portfolio": cand.get("portfolio") or "",
+        },
+        "summary": str(parsed.get("summary") or ""),
+        "skills": [str(s) for s in _as_list(parsed.get("skills"))],
+        "experience": experience,
+        "education": education,
+        "certifications": [str(c) for c in _as_list(parsed.get("certifications"))],
+        "languages": [str(le) for le in _as_list(parsed.get("languages"))],
+    }
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -163,6 +217,26 @@ async def deep_summary(body: SummaryRequest, user: dict = Depends(get_current_us
         parsed = {"overall_fit": raw, "strengths": [], "concerns": [], "experience_highlights": [], "recommendation": "Maybe"}
     await ai.log_usage("summary", user_id=user["id"], job_id=job["id"], candidate_id=cand["id"])
     return parsed
+
+
+@router.post("/structure")
+async def structure_resume(body: StructureRequest, user: dict = Depends(get_current_user)):
+    """Return a candidate's resume as structured data for the formatted viewer.
+
+    Generated once by the AI, then cached on the candidate record, so a resume
+    is only ever parsed the first time someone views it — the cost-efficient
+    path. Pass refresh=true to regenerate.
+    """
+    cand, job = await _get_owned_candidate(body.candidate_id, user)
+
+    if cand.get("resume_structured") and not body.refresh:
+        return {"structured": cand["resume_structured"], "cached": True}
+
+    raw = await ai.call_ai(ai.STRUCTURE_SYSTEM, ai.build_structure_prompt(cand.get("resume_text", "")))
+    structured = _normalize_structure(ai.parse_ai_json(raw), cand)
+    await candidates.update_one({"id": cand["id"]}, {"$set": {"resume_structured": structured}})
+    await ai.log_usage("structure", user_id=user["id"], job_id=job["id"], candidate_id=cand["id"])
+    return {"structured": structured, "cached": False}
 
 
 @router.post("/compare")

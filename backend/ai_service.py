@@ -100,6 +100,7 @@ COST_TABLE = {
     "compare":         {"tokens": 2000, "cost": 0.002},
     "summary":         {"tokens": 1800, "cost": 0.0018},
     "pipeline-health": {"tokens": 1000, "cost": 0.001},
+    "structure":       {"tokens": 2000, "cost": 0.002},
 }
 
 async def log_usage(action: str, user_id: str = None, job_id: str = None, candidate_id: str = None):
@@ -421,3 +422,38 @@ PIPELINE DATA (JSON):
 Provide a short report (plain text, 4-7 sentences) covering: overall health, bottlenecks,
 candidates needing action, and 2-3 concrete recommendations. Be specific and reference the numbers.
 No markdown headers, just clear prose."""
+
+
+STRUCTURE_SYSTEM = (
+    "You are an expert resume parser. You reorganise a resume into clean, structured data. "
+    + UNIVERSAL_CONTEXT
+    + " You NEVER invent anything — you only restructure what is present, and you leave a "
+    "field empty when the resume does not provide it. Return strict JSON only."
+)
+
+
+def build_structure_prompt(resume_text: str) -> str:
+    return f"""Convert the resume below into structured JSON so it can be displayed in a
+consistent, professional layout. Use ONLY information actually present in the resume — never
+invent employers, dates, qualifications, skills or contact details. Leave a string empty ("")
+or an array empty ([]) when the resume does not provide that information. Keep wording concise
+and faithful to the source; do not editorialise.
+
+RESUME:
+{resume_text[:8000]}
+
+Return ONLY a JSON object with exactly these keys:
+- name: string
+- headline: string (a short professional title or tagline if present, else "")
+- contact: object with keys "email", "phone", "location" (all strings)
+- summary: string (a professional summary/objective if present, else "")
+- skills: array of strings
+- experience: array of objects, each with:
+    "title" (string), "organization" (string), "dates" (string),
+    "location" (string), "highlights" (array of strings)
+- education: array of objects, each with:
+    "qualification" (string), "institution" (string), "dates" (string)
+- certifications: array of strings (licences, certifications, tickets, registrations, memberships)
+- languages: array of strings
+
+No prose, no markdown."""

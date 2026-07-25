@@ -94,6 +94,11 @@ class SummaryRequest(BaseModel):
     candidate_id: str
 
 
+class StructureRequest(BaseModel):
+    candidate_id: str
+    refresh: bool = False  # regenerate even if a cached structure exists
+
+
 # ---------- Feedback ----------
 class FeedbackRequest(BaseModel):
     type: str  # "review" | "bug" | "feature"

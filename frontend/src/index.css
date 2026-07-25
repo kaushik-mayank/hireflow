@@ -107,3 +107,30 @@ body {
   animation: ai-flash 1.6s ease-out;
   border-radius: 12px;
 }
+
+/* Print support for the formatted resume viewer. A hidden clone of the resume
+   lives in the page (.print-only); on print everything else is suppressed and
+   only that clone is shown, full-length, so "Save as PDF" produces a clean
+   one-resume document regardless of the modal it was viewed in. */
+.print-only {
+  display: none;
+}
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-only,
+  .print-only * {
+    visibility: visible !important;
+  }
+  .print-only {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 24px;
+  }
+}

@@ -68,6 +68,7 @@ export const aiApi = {
   questions: (candidate_id) => client.post("/ai/questions", { candidate_id }),
   email: (candidate_id, email_type) => client.post("/ai/email", { candidate_id, email_type }),
   summary: (candidate_id) => client.post("/ai/summary", { candidate_id }),
+  structure: (candidate_id, refresh = false) => client.post("/ai/structure", { candidate_id, refresh }),
   compare: (a, b) => client.post("/ai/compare", { candidate_id_a: a, candidate_id_b: b }),
   pipelineHealth: () => client.post("/ai/pipeline-health"),
 };
