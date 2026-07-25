@@ -1,5 +1,6 @@
 import { Component } from "react";
 import { AlertTriangle } from "lucide-react";
+import { SUPPORT_EMAIL } from "@/constants";
 
 /**
  * Catches render errors so one broken component cannot blank the entire app.
@@ -37,7 +38,10 @@ export default class ErrorBoundary extends Component {
           <h1 className="mt-5 text-xl font-semibold text-gray-800">Something went wrong</h1>
           <p className="mt-2 text-sm text-gray-600 leading-relaxed">
             This page hit an unexpected error. Reloading usually clears it. If it keeps
-            happening, please send us a bug report from the Support section.
+            happening, please email us at{" "}
+            <a href={`mailto:${SUPPORT_EMAIL}`} className="text-indigo font-medium hover:underline">
+              {SUPPORT_EMAIL}
+            </a>.
           </p>
           <div className="mt-7 flex flex-wrap gap-3 justify-center">
             <button

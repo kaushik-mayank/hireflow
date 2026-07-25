@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Hexagon, Pencil, Star } from "lucide-react";
+import { Hexagon, Star } from "lucide-react";
 
 /**
  * Shared building blocks for the public marketing site.
@@ -99,25 +99,6 @@ export function FeatureCard({ icon: Icon, title, children }) {
   );
 }
 
-/**
- * Marks invented copy as invented.
- *
- * Uses a neutral dashed treatment rather than the amber accent on purpose —
- * amber means "AI" everywhere else in this product and that convention is
- * worth protecting.
- */
-export function PlaceholderNote({ children, className = "" }) {
-  return (
-    <div className={`flex items-start gap-2.5 rounded-lg border border-dashed border-gray-400 bg-gray-50 px-4 py-3 text-xs leading-relaxed text-gray-600 ${className}`}>
-      <Pencil size={14} className="mt-0.5 shrink-0 text-gray-400" />
-      <p>
-        <span className="font-semibold text-gray-700">Placeholder content — </span>
-        {children}
-      </p>
-    </div>
-  );
-}
-
 export function Stat({ value, label, tone = "light" }) {
   const onNavy = tone === "navy";
   return (
@@ -144,7 +125,7 @@ export function Rating({ value = 5 }) {
 }
 
 export function TestimonialCard({ testimonial }) {
-  const { quote, name, title, org, industry, rating, isPlaceholder } = testimonial;
+  const { quote, name, title, org, industry, rating } = testimonial;
   return (
     <figure className="flex flex-col bg-white border border-gray-200 rounded-xl shadow-soft p-5">
       <Rating value={rating} />
@@ -161,11 +142,6 @@ export function TestimonialCard({ testimonial }) {
             </span>
           )}
         </div>
-        {isPlaceholder && (
-          <div className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-dashed border-gray-400 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-600">
-            <Pencil size={10} /> Sample — not a real customer
-          </div>
-        )}
       </figcaption>
     </figure>
   );

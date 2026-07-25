@@ -1,3 +1,7 @@
+// Single source of truth for the public support/contact address. Referenced by
+// the marketing pages, auth pages and the error boundary so it changes in one place.
+export const SUPPORT_EMAIL = "hireflow@cortinix.com";
+
 export const STAGES = [
   "Applied",
   "AI Ranked",

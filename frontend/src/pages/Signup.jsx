@@ -4,6 +4,7 @@ import { Hexagon, ArrowRight, MailCheck } from "lucide-react";
 import { authApi, apiErr } from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Spinner } from "@/components/ui";
+import { SUPPORT_EMAIL } from "@/constants";
 import {
   isFirebaseConfigured, allowPasswordFallback, firebaseSignUp, firebaseSignIn,
   firebaseSignOut, firebaseErrorMessage,
@@ -88,7 +89,7 @@ export default function Signup() {
         // silently creating a weaker account. This is the guard against the
         // original misconfiguration silently bypassing Firebase.
         setServerError(
-          "Sign-up is unavailable because secure authentication isn't configured. Please contact support."
+          `Sign-up is unavailable because secure authentication isn't configured. Please contact support at ${SUPPORT_EMAIL}.`
         );
       }
     } catch (err) {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, Check, Clock, Users, FileQuestion } from "lucide-react";
 import {
   Section, SectionHeading, Eyebrow, FeatureCard, LinkButton, CTABand,
-  TestimonialCard, PlaceholderNote, CONTAINER,
+  TestimonialCard, CONTAINER,
 } from "@/components/marketing";
 import { FEATURES, STEPS, INDUSTRIES, TESTIMONIALS, HERO_ROLES, COMING_SOON } from "@/data/marketing";
 
@@ -177,22 +177,16 @@ function Industries() {
 }
 
 function SocialProof() {
+  // No fabricated testimonials — the section appears only once real reviews exist.
+  if (!TESTIMONIALS.length) return null;
   return (
     <Section tone="muted">
       <SectionHeading
         eyebrow="Social proof"
         title="What teams say"
-        subtitle="HireFlow is in early access. The quotes below are illustrative samples, not real customers — they will be replaced with genuine reviews as they come in."
+        subtitle="How teams across different industries describe hiring with HireFlow."
       />
-      <div className="mt-10 mx-auto max-w-2xl">
-        <PlaceholderNote>
-          These testimonials are written examples used to lay out the page. Replace them in
-          <code className="mx-1 rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">src/data/marketing.js</code>
-          and remove the <code className="rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">isPlaceholder</code> flag
-          once real reviews are collected.
-        </PlaceholderNote>
-      </div>
-      <div className="mt-8 grid gap-5 md:grid-cols-3">
+      <div className="mt-10 grid gap-5 md:grid-cols-3">
         {TESTIMONIALS.slice(0, 3).map((t) => (
           <TestimonialCard key={t.id} testimonial={t} />
         ))}

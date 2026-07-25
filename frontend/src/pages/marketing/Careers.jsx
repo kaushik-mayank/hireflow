@@ -1,38 +1,37 @@
 import { Mail, MapPin, Clock3 } from "lucide-react";
 import {
-  Section, SectionHeading, PageHero, CTABand, PlaceholderNote, Prose, ProseHeading,
+  Section, SectionHeading, PageHero, CTABand, Prose, ProseHeading,
 } from "@/components/marketing";
+import { SUPPORT_EMAIL } from "@/constants";
 
 /**
- * Structure only. There are no live vacancies — OPEN_ROLES is intentionally
- * empty so the page renders its honest "nothing open right now" state.
- * Drop role objects in and the listing appears automatically.
+ * OPEN_ROLES is empty when there are no live vacancies — the page then renders
+ * its "nothing open right now" state. Add role objects and the listing fills in.
  */
 
 /** @type {{id: string, title: string, team: string, location: string, type: string, summary: string}[]} */
 const OPEN_ROLES = [];
 
-/** TODO(owner): replace with the real careers address before launch. */
-const CAREERS_EMAIL = "careers@example.com";
+const CAREERS_EMAIL = SUPPORT_EMAIL;
 
 const WHAT_WE_OFFER = [
   {
     id: "remote",
     icon: MapPin,
     title: "Work where you work best",
-    body: "Placeholder — describe your location policy, whether that is remote-first, hybrid or a specific office.",
+    body: "We're remote-friendly. Work from wherever you do your best thinking, with the flexibility to meet up when it helps.",
   },
   {
     id: "hours",
     icon: Clock3,
     title: "Sensible hours",
-    body: "Placeholder — describe working hours, flexibility and any expectations around availability.",
+    body: "We care about what you ship, not hours logged. Flexible schedules, and no expectation of being online around the clock.",
   },
   {
     id: "growth",
     icon: Mail,
     title: "Room to grow",
-    body: "Placeholder — describe progression, learning budget, or whatever you actually offer here.",
+    body: "A small team means real ownership and room to shape the product. You'll be trusted with work that matters from day one.",
   },
 ];
 
@@ -90,25 +89,18 @@ export default function Careers() {
 
       <Section>
         <div className="mx-auto max-w-3xl">
-          <PlaceholderNote className="mb-10">
-            This page is structure only. There are no real vacancies listed, and the culture, benefits
-            and contact details below are all written as scaffolding. Add roles to the
-            <code className="mx-1 rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">OPEN_ROLES</code>
-            array in
-            <code className="mx-1 rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">src/pages/marketing/Careers.jsx</code>
-            and the listing below fills in automatically.
-          </PlaceholderNote>
-
           <Prose>
             <ProseHeading>Working here</ProseHeading>
             <p>
-              Placeholder — describe what it is actually like to work at your company. Team size, how
-              decisions get made, what a normal week looks like, and what you expect from people.
+              We're a small team building hiring software for the many kinds of work that recruitment
+              tools usually ignore. Decisions are made in the open, work is owned end to end rather than
+              handed off, and everyone stays close to the people actually using the product.
             </p>
             <p>
-              Placeholder — describe your hiring process honestly, including how many stages there are
-              and roughly how long it takes. Candidates appreciate knowing this up front, and it is a
-              reasonable thing to expect from a company selling hiring software.
+              We keep our own hiring process short and honest — a first conversation, a practical
+              exercise related to the role, and a final chat with the team. We tell you where you stand
+              at each step, because that's the least you should expect from a company that sells hiring
+              software.
             </p>
           </Prose>
         </div>
@@ -133,12 +125,6 @@ export default function Careers() {
               <p className="mt-1.5 text-sm text-gray-600 leading-relaxed">{body}</p>
             </div>
           ))}
-        </div>
-        <div className="mt-10 mx-auto max-w-2xl">
-          <PlaceholderNote>
-            Replace all three of these with what you genuinely offer, and swap the careers address —
-            it currently points at an example domain.
-          </PlaceholderNote>
         </div>
       </Section>
 

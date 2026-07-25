@@ -1,20 +1,13 @@
-import { ShieldAlert } from "lucide-react";
-import { Section, PageHero, Prose, ProseHeading, PlaceholderNote } from "@/components/marketing";
+import { Section, PageHero, Prose, ProseHeading } from "@/components/marketing";
+import { SUPPORT_EMAIL } from "@/constants";
 
 /**
- * A complete, genuine privacy policy for a SaaS that stores candidate resumes
- * and personal data — NOT legal advice and NOT reviewed by a lawyer.
- *
- * Owner must confirm before publishing:
- *   - the contact addresses and legal entity name below
- *   - the sub-processor list (§7) against what is actually deployed
- *   - retention periods (§9), which are currently stated as intentions
- *   - which privacy regimes actually apply to your customers
+ * Privacy policy for a SaaS that stores candidate resumes and personal data.
+ * Internal note (not rendered): have this reviewed by privacy counsel and keep
+ * the §7 sub-processor list in sync with what is actually deployed.
  */
 
-/** TODO(owner): replace all three before launch. */
-const PRIVACY_EMAIL = "privacy@example.com";
-const SUPPORT_EMAIL = "support@example.com";
+const PRIVACY_EMAIL = SUPPORT_EMAIL;
 const LEGAL_ENTITY = "HireFlow";
 
 const LAST_UPDATED = "23 July 2026";
@@ -53,27 +46,7 @@ export default function Privacy() {
 
       <Section>
         <div className="mx-auto max-w-3xl">
-          <div className="rounded-xl border border-coral bg-coral-light px-5 py-4">
-            <div className="flex items-start gap-3">
-              <ShieldAlert size={18} className="mt-0.5 shrink-0 text-coral" />
-              <div className="text-sm text-coral leading-relaxed">
-                <span className="font-semibold">Requires legal review before publication.</span> This
-                policy was drafted to be accurate to how HireFlow actually works, but it has not been
-                reviewed by a qualified lawyer and is not legal advice. Have a solicitor or privacy
-                counsel check it against the jurisdictions you operate in before you rely on it.
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6">
-            <PlaceholderNote>
-              The contact addresses, legal entity name, retention periods and sub-processor list below
-              must all be confirmed against your live setup. They are marked with TODO comments in
-              <code className="mx-1 rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">src/pages/marketing/Privacy.jsx</code>.
-            </PlaceholderNote>
-          </div>
-
-          <p className="mt-8 text-xs uppercase tracking-wider text-gray-600 font-semibold">
+          <p className="text-xs uppercase tracking-wider text-gray-600 font-semibold">
             Last updated: {LAST_UPDATED}
           </p>
 
@@ -314,14 +287,6 @@ export default function Privacy() {
               .
             </p>
           </Prose>
-
-          <div className="mt-10">
-            <PlaceholderNote>
-              Before publishing, confirm: the legal entity name and registered address, both contact
-              addresses, that the sub-processor table in section 7 matches what is actually deployed,
-              and that the retention periods in section 9 reflect what you really do.
-            </PlaceholderNote>
-          </div>
         </div>
       </Section>
     </>

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { MessageSquareQuote } from "lucide-react";
 import {
-  Section, PageHero, CTABand, PlaceholderNote, TestimonialCard, Rating,
+  Section, PageHero, CTABand, TestimonialCard, Rating,
 } from "@/components/marketing";
 import { TESTIMONIALS } from "@/data/marketing";
 
@@ -46,8 +46,6 @@ export default function Reviews() {
     return Math.round((rated.reduce((sum, t) => sum + t.rating, 0) / rated.length) * 10) / 10;
   }, []);
 
-  const anyPlaceholder = TESTIMONIALS.some((t) => t.isPlaceholder);
-
   return (
     <>
       <PageHero
@@ -66,20 +64,6 @@ export default function Reviews() {
       </PageHero>
 
       <Section tone="muted">
-        {anyPlaceholder && (
-          <div className="mx-auto max-w-3xl mb-10">
-            <PlaceholderNote>
-              Some or all of the reviews below are illustrative samples, not real customers — each one
-              is individually marked. Replace them in
-              <code className="mx-1 rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">src/data/marketing.js</code>
-              and drop the
-              <code className="mx-1 rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">isPlaceholder</code>
-              flag as genuine reviews come in. This whole page renders from that array, so nothing
-              here needs editing.
-            </PlaceholderNote>
-          </div>
-        )}
-
         {industries.length > 2 && (
           <div className="flex flex-wrap justify-center gap-2 mb-10" role="group" aria-label="Filter reviews by industry">
             {industries.map((name) => (

@@ -1,6 +1,6 @@
 import { Check, Info } from "lucide-react";
 import {
-  Section, SectionHeading, PageHero, LinkButton, CTABand, PlaceholderNote,
+  Section, SectionHeading, PageHero, LinkButton, CTABand,
 } from "@/components/marketing";
 
 /**
@@ -155,14 +155,6 @@ export default function Pricing() {
           {TIERS.map((t) => (
             <TierCard key={t.id} tier={t} />
           ))}
-        </div>
-
-        <div className="mt-10 mx-auto max-w-3xl">
-          <PlaceholderNote>
-            Tier names, feature splits and every price on this page are provisional and need your
-            sign-off before launch. Edit them in
-            <code className="mx-1 rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">src/pages/marketing/Pricing.jsx</code>.
-          </PlaceholderNote>
         </div>
       </Section>
 

@@ -142,80 +142,14 @@ export const INDUSTRIES = [
 /**
  * Data-driven so real reviews can be dropped straight in.
  *
- * Shape: { id, quote, name, title, org, industry, rating (1-5), isPlaceholder }
+ * Shape: { id, quote, name, title, org, industry, rating (1-5) }
  *
- * To publish real ones: replace the objects below and remove `isPlaceholder`.
- * Any entry still carrying `isPlaceholder: true` renders with a visible
- * "sample" marker, so nothing invented can be mistaken for a real customer.
+ * Intentionally empty: real customer reviews are added here as they come in.
+ * The Reviews page and the home page social-proof section both handle an empty
+ * list gracefully (nothing is shown / an empty state), so no invented quotes
+ * are ever presented as genuine.
  */
-export const TESTIMONIALS = [
-  {
-    id: "t1",
-    quote:
-      "We were filling the same three ward roles over and over and losing good applicants to slow replies. Now the first pass happens the same day the resumes land.",
-    name: "Sample Name",
-    title: "Head of Talent",
-    org: "Regional care group",
-    industry: "Healthcare",
-    rating: 5,
-    isPlaceholder: true,
-  },
-  {
-    id: "t2",
-    quote:
-      "Peak season means four hundred applications in a fortnight. Ranking them by hand was two people's entire week. It isn't any more.",
-    name: "Sample Name",
-    title: "Operations Manager",
-    org: "Distribution centre",
-    industry: "Warehouse & logistics",
-    rating: 5,
-    isPlaceholder: true,
-  },
-  {
-    id: "t3",
-    quote:
-      "The generated screening questions actually reference the certifications the job needs. That was the part I expected to have to rewrite and didn't.",
-    name: "Sample Name",
-    title: "Site Manager",
-    org: "Electrical contractor",
-    industry: "Trades & construction",
-    rating: 4,
-    isPlaceholder: true,
-  },
-  {
-    id: "t4",
-    quote:
-      "Every applicant hears back now, even the ones we don't take forward. That mattered more to our reputation locally than we expected.",
-    name: "Sample Name",
-    title: "General Manager",
-    org: "Independent restaurant group",
-    industry: "Hospitality & food",
-    rating: 5,
-    isPlaceholder: true,
-  },
-  {
-    id: "t5",
-    quote:
-      "I can see which postings have gone quiet without opening five spreadsheets. That single view is most of the value for me.",
-    name: "Sample Name",
-    title: "People Lead",
-    org: "Software company",
-    industry: "Corporate & professional",
-    rating: 4,
-    isPlaceholder: true,
-  },
-  {
-    id: "t6",
-    quote:
-      "We hire in bursts before every term. Setting the number of positions and watching it count down is exactly how we already thought about it.",
-    name: "Sample Name",
-    title: "Recruitment Coordinator",
-    org: "Multi-academy trust",
-    industry: "Education",
-    rating: 5,
-    isPlaceholder: true,
-  },
-];
+export const TESTIMONIALS = [];
 
 // ---------------------------------------------------------------------------
 // Roadmap

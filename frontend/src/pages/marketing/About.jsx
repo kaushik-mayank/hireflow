@@ -1,12 +1,8 @@
 import { Mail } from "lucide-react";
 import {
-  Section, SectionHeading, PageHero, CTABand, PlaceholderNote, Prose, ProseHeading,
+  Section, SectionHeading, PageHero, CTABand, Prose, ProseHeading,
 } from "@/components/marketing";
-
-/**
- * Company facts the owner needs to supply are marked with PlaceholderNote and
- * kept short on purpose — easier to replace than to unpick from long prose.
- */
+import { SUPPORT_EMAIL } from "@/constants";
 
 const VALUES = [
   {
@@ -31,8 +27,7 @@ const VALUES = [
   },
 ];
 
-/** TODO(owner): replace with the real contact address before launch. */
-const CONTACT_EMAIL = "hello@example.com";
+const CONTACT_EMAIL = SUPPORT_EMAIL;
 
 export default function About() {
   return (
@@ -45,12 +40,6 @@ export default function About() {
 
       <Section>
         <div className="mx-auto max-w-3xl">
-          <PlaceholderNote className="mb-10">
-            The story, founding details and contact address below are written as a starting point and
-            need replacing with your real company facts. Everything on this page lives in
-            <code className="mx-1 rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px]">src/pages/marketing/About.jsx</code>.
-          </PlaceholderNote>
-
           <Prose>
             <ProseHeading>Why we built it</ProseHeading>
             <p>
@@ -118,11 +107,6 @@ export default function About() {
             <a href={`mailto:${CONTACT_EMAIL}`} className="text-[15px] font-medium text-gray-800 hover:text-indigo">
               {CONTACT_EMAIL}
             </a>
-          </div>
-          <div className="mt-6 mx-auto max-w-lg">
-            <PlaceholderNote>
-              Replace this with your real contact address — it currently points at an example domain.
-            </PlaceholderNote>
           </div>
         </div>
       </Section>
