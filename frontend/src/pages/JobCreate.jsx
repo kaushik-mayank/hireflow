@@ -7,7 +7,7 @@ import { Card, Button, AIButton, Modal, Spinner } from "@/components/ui";
 import { toast } from "sonner";
 
 export default function JobCreate() {
-  const [form, setForm] = useState({ title: "", department: "", openings_needed: 1, deadline: "", jd_text: "" });
+  const [form, setForm] = useState({ title: "", department: "", openings_needed: 1, deadline: "", jd_text: "", jd_enhanced: "" });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [enhanceLoading, setEnhanceLoading] = useState(false);
@@ -15,6 +15,10 @@ export default function JobCreate() {
   const navigate = useNavigate();
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  // Editing the original description invalidates a previously attached
+  // enhancement, so drop it to avoid the two drifting out of sync.
+  const setJdText = (e) => setForm((f) => ({ ...f, jd_text: e.target.value, jd_enhanced: "" }));
 
   const validate = () => {
     const er = {};
@@ -55,10 +59,13 @@ export default function JobCreate() {
     }
   };
 
+  // Store the enhanced version ALONGSIDE the original rather than overwriting
+  // it. This is the fix for the job page showing the enhanced text under the
+  // "Original" tab — previously the original was replaced and lost here.
   const acceptEnhance = () => {
-    setForm({ ...form, jd_text: enhanceModal.enhanced });
+    setForm((f) => ({ ...f, jd_enhanced: enhanceModal.enhanced }));
     setEnhanceModal(null);
-    toast.success("Enhanced description applied");
+    toast.success("Enhanced version attached — your original is kept too");
   };
 
   const field = (k) => `w-full rounded-lg border px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo/20 ${errors[k] ? "border-coral" : "border-gray-200 focus:border-indigo"}`;
@@ -102,8 +109,13 @@ export default function JobCreate() {
                   {enhanceLoading ? "Enhancing..." : "Enhance JD with AI"}
                 </AIButton>
               </div>
-              <textarea value={form.jd_text} onChange={set("jd_text")} rows={10} className={`${field("jd_text")} font-mono text-[13px] leading-relaxed`} placeholder="Describe the role, responsibilities, requirements, and skills..." data-testid="job-jd" />
+              <textarea value={form.jd_text} onChange={setJdText} rows={10} className={`${field("jd_text")} font-mono text-[13px] leading-relaxed`} placeholder="Describe the role, responsibilities, requirements, and skills..." data-testid="job-jd" />
               {errors.jd_text && <p className="text-xs text-coral mt-1">{errors.jd_text}</p>}
+              {form.jd_enhanced && (
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-green" data-testid="jd-enhanced-attached">
+                  <Check size={13} /> AI-enhanced version attached — you can compare both on the job page after creating.
+                </p>
+              )}
             </div>
 
             <div className="flex gap-3 pt-2">
@@ -119,7 +131,7 @@ export default function JobCreate() {
       <Modal open={!!enhanceModal} onClose={() => setEnhanceModal(null)} title="AI-Enhanced Job Description" width="max-w-4xl"
         footer={<>
           <Button variant="secondary" onClick={() => setEnhanceModal(null)} data-testid="enhance-dismiss">Dismiss</Button>
-          <Button onClick={acceptEnhance} data-testid="enhance-accept"><Check size={16} /> Accept & Replace</Button>
+          <Button onClick={acceptEnhance} data-testid="enhance-accept"><Check size={16} /> Attach enhanced version</Button>
         </>}>
         <div className="grid grid-cols-2 gap-4">
           <div>

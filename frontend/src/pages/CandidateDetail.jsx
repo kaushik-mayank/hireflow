@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Mail, Phone, ChevronDown, ChevronUp, Sparkles, FileText, GitCompare, MessageSquareText, Send, XCircle } from "lucide-react";
 import { candidatesApi, aiApi, apiErr } from "@/api";
@@ -23,6 +23,28 @@ export default function CandidateDetail() {
   const [compare, setCompare] = useState(null);
   const [loadingAction, setLoadingAction] = useState("");
   const [compareModal, setCompareModal] = useState(false);
+
+  // Inline AI panels render further down the page, so after generation we scroll
+  // to the new content and briefly highlight it — otherwise there is no visual
+  // feedback that anything happened.
+  const summaryRef = useRef(null);
+  const questionsRef = useRef(null);
+  const compareRef = useRef(null);
+
+  const flashInto = (el) => {
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Restart the animation even if the element was already mounted.
+    el.classList.remove("ai-flash");
+    // eslint-disable-next-line no-unused-expressions
+    el.offsetWidth;
+    el.classList.add("ai-flash");
+  };
+
+  // useEffect runs after the panel has rendered, so the scroll target exists.
+  useEffect(() => { if (summary) flashInto(summaryRef.current); }, [summary]);
+  useEffect(() => { if (questions) flashInto(questionsRef.current); }, [questions]);
+  useEffect(() => { if (compare) flashInto(compareRef.current); }, [compare]);
 
   const load = () => {
     candidatesApi.get(id).then((r) => {
@@ -52,6 +74,18 @@ export default function CandidateDetail() {
     try { const r = await fn(); setter(r.data); }
     catch (err) { toast.error(apiErr(err, "AI action failed")); }
     finally { setLoadingAction(""); }
+  };
+
+  // Editing the sender name or organisation best-effort updates the matching
+  // text the AI put in the signature, so the two stay consistent. The body is
+  // also directly editable for anything the replace can't reach.
+  const updateEmailSigner = (key, value) => {
+    setEmail((prev) => {
+      if (!prev) return prev;
+      const old = prev[key];
+      const body = old && prev.body ? prev.body.split(old).join(value) : prev.body;
+      return { ...prev, [key]: value, body };
+    });
   };
 
   const doCompare = async (otherId) => {
@@ -127,27 +161,27 @@ export default function CandidateDetail() {
             </Card>
 
             {/* AI result panels */}
-            {summary && <AIPanel title="Deep Candidate Summary" onClose={() => setSummary(null)}>
+            {summary && <div ref={summaryRef}><AIPanel title="Deep Candidate Summary" onClose={() => setSummary(null)}>
               <p className="text-sm font-medium text-gray-800">{summary.overall_fit}</p>
               <div className="mt-2"><span className="text-xs font-semibold text-gray-500 uppercase">Recommendation: </span><Pill tone={summary.recommendation?.includes("Yes") ? "green" : summary.recommendation === "No" ? "red" : "amber"}>{summary.recommendation}</Pill></div>
               <SkillList label="Strengths" items={summary.strengths} tone="green" />
               <SkillList label="Concerns" items={summary.concerns} tone="red" />
               <SkillList label="Experience Highlights" items={summary.experience_highlights} tone="gray" />
-            </AIPanel>}
+            </AIPanel></div>}
 
-            {questions && <AIPanel title="Screening Questions" onClose={() => setQuestions(null)}>
+            {questions && <div ref={questionsRef}><AIPanel title="Screening Questions" onClose={() => setQuestions(null)}>
               <div className="space-y-2">{questions.map((q, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg p-3"><Pill tone="amber">{q.type}</Pill><p className="text-sm text-gray-700 mt-1.5">{q.question}</p></div>
               ))}</div>
-            </AIPanel>}
+            </AIPanel></div>}
 
-            {compare && <AIPanel title={`Compare: ${compare.candidate_a_name} vs ${compare.candidate_b_name}`} onClose={() => setCompare(null)}>
+            {compare && <div ref={compareRef}><AIPanel title={`Compare: ${compare.candidate_a_name} vs ${compare.candidate_b_name}`} onClose={() => setCompare(null)}>
               <div className="bg-indigo-light/50 rounded-lg p-3 mb-3"><span className="text-xs font-semibold text-indigo uppercase">Recommended: </span><span className="font-medium text-gray-800">{compare.recommendation}</span><p className="text-sm text-gray-700 mt-1">{compare.reasoning}</p></div>
               <div className="grid grid-cols-2 gap-3">
                 <SkillList label={compare.candidate_a_name} items={compare.candidate_a_strengths} tone="gray" />
                 <SkillList label={compare.candidate_b_name} items={compare.candidate_b_strengths} tone="gray" />
               </div>
-            </AIPanel>}
+            </AIPanel></div>}
           </div>
 
           {/* Right 40% */}
@@ -209,14 +243,47 @@ export default function CandidateDetail() {
         </div>
       </PageBody>
 
-      {/* Email modal */}
+      {/* Email modal — fully editable so the recruiter can tweak the draft
+          before copying. Fields are controlled, so the copied text reflects
+          any edits (the previous version copied the original, ignoring them). */}
       {email && (
         <Modal open onClose={() => setEmail(null)} title="Draft Email" width="max-w-xl"
           footer={<Button onClick={() => { navigator.clipboard.writeText(`Subject: ${email.subject}\n\n${email.body}`); toast.success("Copied to clipboard"); }} data-testid="email-copy">Copy to Clipboard</Button>}>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase">Your name</label>
+              <input
+                value={email.sender_name || ""}
+                onChange={(e) => updateEmailSigner("sender_name", e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1"
+                data-testid="email-sender"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase">Organisation</label>
+              <input
+                value={email.organization || ""}
+                onChange={(e) => updateEmailSigner("organization", e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mt-1"
+                data-testid="email-org"
+              />
+            </div>
+          </div>
           <label className="text-xs font-semibold text-gray-500 uppercase">Subject</label>
-          <input defaultValue={email.subject} className="w-full font-medium border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 mt-1" data-testid="email-subject" />
+          <input
+            value={email.subject || ""}
+            onChange={(e) => setEmail((prev) => ({ ...prev, subject: e.target.value }))}
+            className="w-full font-medium border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 mt-1"
+            data-testid="email-subject"
+          />
           <label className="text-xs font-semibold text-gray-500 uppercase">Body</label>
-          <textarea defaultValue={email.body} rows={12} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm leading-relaxed mt-1" data-testid="email-body" />
+          <textarea
+            value={email.body || ""}
+            onChange={(e) => setEmail((prev) => ({ ...prev, body: e.target.value }))}
+            rows={14}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm leading-relaxed mt-1 whitespace-pre-wrap"
+            data-testid="email-body"
+          />
         </Modal>
       )}
 

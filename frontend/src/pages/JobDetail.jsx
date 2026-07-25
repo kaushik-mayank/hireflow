@@ -33,6 +33,10 @@ export default function JobDetail() {
     candidatesApi.listByJob(id).then((r) => setCands(r.data)).catch(() => {});
   }, [id]);
 
+  // Single navigation handler shared by the candidate name and the Eye icon so
+  // both open the same profile page without duplicating the route.
+  const openCandidate = useCallback((cid) => navigate(`/candidates/${cid}`), [navigate]);
+
   useEffect(() => {
     Promise.all([jobsApi.get(id), candidatesApi.listByJob(id)])
       .then(([j, c]) => { setJob(j.data); setCands(c.data); })
@@ -224,7 +228,14 @@ export default function JobDetail() {
                     <Avatar name={c.name} size={38} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-800 truncate">{c.name}</span>
+                        <button
+                          onClick={() => openCandidate(c.id)}
+                          className="font-medium text-gray-800 truncate hover:text-indigo hover:underline text-left"
+                          title="View profile"
+                          data-testid={`cand-name-${c.id}`}
+                        >
+                          {c.name}
+                        </button>
                         <ScoreBadge score={c.ai_score} />
                       </div>
                       <div className="flex flex-wrap gap-1 mt-1">
@@ -234,7 +245,7 @@ export default function JobDetail() {
                     </div>
                     <StageBadge stage={c.stage} />
                     <div className="flex gap-1">
-                      <button onClick={() => navigate(`/candidates/${c.id}`)} className="p-2 text-gray-500 hover:text-indigo hover:bg-indigo-light rounded-lg" title="View profile" data-testid={`cand-view-${c.id}`}><Eye size={16} /></button>
+                      <button onClick={() => openCandidate(c.id)} className="p-2 text-gray-500 hover:text-indigo hover:bg-indigo-light rounded-lg" title="View profile" data-testid={`cand-view-${c.id}`}><Eye size={16} /></button>
                       <button onClick={() => removeCand(c.id)} className="p-2 text-gray-500 hover:text-coral hover:bg-coral-light rounded-lg" title="Delete" data-testid={`cand-delete-${c.id}`}><Trash2 size={16} /></button>
                     </div>
                   </Card>

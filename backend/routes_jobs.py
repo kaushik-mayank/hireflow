@@ -70,7 +70,7 @@ async def create_job(body: JobCreate, user: dict = Depends(get_current_user)):
         "department": body.department,
         "openings_needed": body.openings_needed,
         "jd_text": body.jd_text,
-        "jd_enhanced": None,
+        "jd_enhanced": body.jd_enhanced,
         "status": body.status or "active",
         "deadline": body.deadline,
         "created_at": now,

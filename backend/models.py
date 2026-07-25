@@ -31,6 +31,10 @@ class JobCreate(BaseModel):
     department: Optional[str] = None
     openings_needed: int = 1
     jd_text: Optional[str] = None
+    # The AI-enhanced description is stored ALONGSIDE the original, never in
+    # place of it, so the job page can show both an "Original" and an
+    # "Enhanced" tab. The original jd_text remains what the user actually typed.
+    jd_enhanced: Optional[str] = None
     deadline: Optional[str] = None
     status: str = "active"
 

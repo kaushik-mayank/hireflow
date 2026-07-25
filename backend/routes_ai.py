@@ -131,17 +131,25 @@ async def screening_questions(body: QuestionsRequest, user: dict = Depends(get_c
 @router.post("/email")
 async def draft_email(body: EmailRequest, user: dict = Depends(get_current_user)):
     cand, job = await _get_owned_candidate(body.candidate_id, user)
+    company = user.get("company") or ""
+    sender_name = user.get("name") or ""
     raw = await ai.call_ai(
         ai.EMAIL_SYSTEM,
         # The JD is passed so the draft can match the register of the actual role
-        # rather than defaulting to a single corporate tone.
+        # rather than defaulting to a single corporate tone. The signer's name
+        # and organisation are passed so the signature is real, not a placeholder.
         ai.build_email_prompt(
-            body.email_type, cand, job["title"], user.get("company"), job.get("jd_text", "")
+            body.email_type, cand, job["title"], company,
+            job.get("jd_text", ""), sender_name,
         ),
     )
     parsed = ai.parse_ai_json(raw)
     if not isinstance(parsed, dict):
         parsed = {"subject": "", "body": raw}
+    # Return the values used to sign the email so the frontend can offer them as
+    # editable fields before the recruiter sends or copies the draft.
+    parsed["sender_name"] = sender_name
+    parsed["organization"] = company
     await ai.log_usage("email", user_id=user["id"], job_id=job["id"], candidate_id=cand["id"])
     return parsed
 

@@ -290,12 +290,16 @@ EMAIL_SYSTEM = (
 
 
 def build_email_prompt(
-    email_type: str, candidate: dict, job_title: str, company: str, jd_text: str = ""
+    email_type: str, candidate: dict, job_title: str, company: str,
+    jd_text: str = "", sender_name: str = "",
 ) -> str:
     jd_block = f"""
 JOB DESCRIPTION (for context on the role and the right tone):
 {jd_text[:2500]}
 """ if jd_text else ""
+
+    org = company or "our organisation"
+    signer = sender_name or "The Hiring Team"
 
     return f"""Draft a {email_type} email to this candidate.
 
@@ -308,16 +312,27 @@ kinder than padding.
 
 Candidate name: {candidate.get('name') or 'Candidate'}
 Role: {job_title}
-Organisation: {company or 'our organisation'}
+Organisation: {org}
+Sender (person signing the email): {signer}
 Candidate summary: {candidate.get('ai_summary') or 'N/A'}
 {jd_block}
 Do not invent specifics — no interview times, pay figures, locations or start dates unless
 they appear above. Where a concrete detail is needed but unknown, leave a clearly marked
 placeholder in square brackets for the sender to fill in.
 
+FORMAT THE BODY as a real email with clear separation, NOT one continuous block. Use these
+parts, each separated by a BLANK LINE (a literal \\n\\n between them):
+  1. A greeting line addressed to the candidate by name (e.g. "Hi {candidate.get('name') or 'there'},").
+  2. One or two short body paragraphs, each its own paragraph separated by a blank line.
+  3. A brief closing line.
+  4. A signature block on its own lines: a sign-off (e.g. "Best regards,"), then "{signer}",
+     then "{org}".
+Address the candidate and sign off with the real names given above — do not leave the
+name or organisation as a placeholder.
+
 Return ONLY a JSON object with:
 - subject: the email subject line
-- body: the full email body, ready to send, with a greeting and a sign-off placeholder
+- body: the full email body as plain text, with real newlines between the parts as described
 
 No prose, no markdown."""
 
