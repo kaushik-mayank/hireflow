@@ -35,12 +35,12 @@ export default function Login() {
         return;
       }
 
-      let idToken;
+      let result;
       try {
-        idToken = await firebaseSignIn(email, password);
+        result = await firebaseSignIn(email, password);
       } catch (fbErr) {
-        // No Firebase account? Could be a pre-Firebase user — try the old path
-        // before telling anyone their details are wrong.
+        // No Firebase account? Could be a pre-Firebase user (including the demo
+        // accounts) — try the old path before telling anyone their details are wrong.
         if (shouldTryLegacyLogin(fbErr)) {
           try {
             await legacyLogin();
@@ -54,7 +54,16 @@ export default function Login() {
         return;
       }
 
-      const res = await authApi.firebase({ id_token: idToken });
+      if (!result.emailVerified) {
+        setError("Please verify your email first — we've sent you a new verification link. Check your inbox, then sign in.");
+        return;
+      }
+
+      const res = await authApi.firebase({ id_token: result.idToken });
+      if (!res.data.verified || !res.data.token) {
+        setError("Please verify your email first, then sign in.");
+        return;
+      }
       login(res.data.token, res.data.user);
       navigate("/dashboard");
     } catch (err) {

@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -76,6 +77,14 @@ async def login(body: LoginRequest, request: Request):
     return {"token": create_token(user), "user": _public_user(user)}
 
 
+# Whether a Firebase user must have a verified email before a session is
+# issued. Defaults on — during live testing you want real, confirmed emails.
+# Set REQUIRE_EMAIL_VERIFICATION=false only if you deliberately want to skip it.
+REQUIRE_EMAIL_VERIFICATION = os.environ.get(
+    "REQUIRE_EMAIL_VERIFICATION", "true"
+).strip().lower() not in ("0", "false", "no", "off")
+
+
 @router.post("/firebase")
 async def firebase_exchange(body: FirebaseAuthRequest, request: Request):
     """Exchange a verified Firebase ID token for this app's own JWT.
@@ -83,6 +92,13 @@ async def firebase_exchange(body: FirebaseAuthRequest, request: Request):
     Firebase owns credentials, email verification and password resets. Session
     handling downstream is unchanged: the caller receives the same JWT the
     password flow issues, so every existing route and guard keeps working.
+
+    The account record (including the name and company entered at signup) is
+    created/updated whenever a valid token arrives, so nothing is lost — but a
+    SESSION is only issued once the email is verified. Until then this returns
+    {"verified": false} and no token, which is how the frontend knows to show
+    the "check your email" screen. This closes the reported gap where creating
+    a password granted immediate dashboard access.
 
     Accounts created here are always `hr`. Admin comes only from the allowlist.
     """
@@ -97,13 +113,17 @@ async def firebase_exchange(body: FirebaseAuthRequest, request: Request):
     if user:
         if not user.get("is_active", 1):
             raise HTTPException(status_code=403, detail="Your account has been deactivated")
-        # Link the Firebase UID on first federated sign-in of an existing
-        # account, so the allowlist can match on UID as well as email.
+        updates = {"email_verified": claims["email_verified"]}
+        # Link the Firebase UID on first federated sign-in of an existing account.
         if user.get("firebase_uid") != claims["uid"]:
-            await users.update_one(
-                {"id": user["id"]}, {"$set": {"firebase_uid": claims["uid"]}}
-            )
-            user["firebase_uid"] = claims["uid"]
+            updates["firebase_uid"] = claims["uid"]
+        # Backfill name/company from signup if this record was missing them.
+        if body.name and not user.get("name"):
+            updates["name"] = body.name
+        if body.company and not user.get("company"):
+            updates["company"] = body.company
+        await users.update_one({"id": user["id"]}, {"$set": updates})
+        user.update(updates)
     else:
         user = {
             "id": str(uuid.uuid4()),
@@ -121,8 +141,12 @@ async def firebase_exchange(body: FirebaseAuthRequest, request: Request):
         await users.insert_one(user)
         user.pop("_id", None)
 
+    # Gate the session on a verified email. The record above is already saved.
+    if REQUIRE_EMAIL_VERIFICATION and not claims["email_verified"]:
+        return {"verified": False}
+
     await _record_login(user, request)
-    return {"token": create_token(user), "user": _public_user(user)}
+    return {"verified": True, "token": create_token(user), "user": _public_user(user)}
 
 
 @router.get("/me")

@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Hexagon, ArrowRight } from "lucide-react";
+import { Hexagon, ArrowRight, MailCheck } from "lucide-react";
 import { authApi, apiErr } from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Spinner } from "@/components/ui";
-import { isFirebaseConfigured, firebaseSignUp, firebaseErrorMessage } from "@/lib/firebase";
+import {
+  isFirebaseConfigured, allowPasswordFallback, firebaseSignUp, firebaseSignIn,
+  firebaseSignOut, firebaseErrorMessage,
+} from "@/lib/firebase";
 
 function strength(pw) {
   let s = 0;
@@ -22,6 +25,8 @@ export default function Signup() {
   const [errors, setErrors] = useState({});
   const [serverError, setServerError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [verifySent, setVerifySent] = useState(false);
+  const [resending, setResending] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -52,21 +57,57 @@ export default function Signup() {
           setServerError(firebaseErrorMessage(fbErr, "Could not create account"));
           return;
         }
-        const res = await authApi.firebase({
-          id_token: idToken, name: form.name, company: form.company,
-        });
-        login(res.data.token, res.data.user);
-      } else {
+        // Persist the account (name + company) but do NOT enter the dashboard:
+        // the backend withholds a session until the email is verified, returning
+        // { verified: false }. Sign the fresh Firebase session out so an
+        // unverified user isn't left signed in.
+        try {
+          const res = await authApi.firebase({
+            id_token: idToken, name: form.name, company: form.company,
+          });
+          await firebaseSignOut();
+          if (res.data.verified && res.data.token) {
+            login(res.data.token, res.data.user);
+            navigate("/dashboard");
+          } else {
+            setVerifySent(true);
+          }
+        } catch (err) {
+          await firebaseSignOut();
+          setServerError(apiErr(err, "Could not create account"));
+        }
+      } else if (allowPasswordFallback) {
+        // Local dev only, gated by REACT_APP_ALLOW_PASSWORD_FALLBACK=true.
         const res = await authApi.signup({
           name: form.name, email: form.email, password: form.password, company: form.company,
         });
         login(res.data.token, res.data.user);
+        navigate("/dashboard");
+      } else {
+        // Firebase not configured and no dev fallback: fail visibly rather than
+        // silently creating a weaker account. This is the guard against the
+        // original misconfiguration silently bypassing Firebase.
+        setServerError(
+          "Sign-up is unavailable because secure authentication isn't configured. Please contact support."
+        );
       }
-      navigate("/dashboard");
     } catch (err) {
       setServerError(apiErr(err, "Could not create account"));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    setResending(true);
+    try {
+      // Signing in again resends the verification link (and returns unverified).
+      await firebaseSignIn(form.email, form.password);
+      setServerError("");
+    } catch {
+      /* ignore — the button just offers another attempt */
+    } finally {
+      setResending(false);
     }
   };
 
@@ -91,6 +132,28 @@ export default function Signup() {
       </div>
 
       <div className="flex-1 flex items-center justify-center bg-gray-50 p-6 overflow-y-auto">
+        {verifySent ? (
+          <div className="w-full max-w-sm py-8 animate-fade-in" data-testid="signup-verify">
+            <div className="w-14 h-14 rounded-2xl bg-green-light flex items-center justify-center">
+              <MailCheck size={26} className="text-green" />
+            </div>
+            <h1 className="mt-5 text-2xl font-semibold text-gray-800">Verify your email</h1>
+            <p className="text-gray-600 text-sm mt-2 leading-relaxed">
+              We've sent a verification link to <span className="font-medium text-gray-800">{form.email}</span>.
+              Open it to confirm your address, then sign in. You won't be able to access the dashboard until your
+              email is verified.
+            </p>
+            <Button onClick={() => navigate("/login")} className="mt-7 w-full">Go to sign in</Button>
+            <button
+              onClick={resendVerification}
+              disabled={resending}
+              className="mt-3 w-full text-sm text-indigo font-medium hover:underline disabled:opacity-50"
+              data-testid="signup-resend"
+            >
+              {resending ? "Resending…" : "Resend verification email"}
+            </button>
+          </div>
+        ) : (
         <div className="w-full max-w-sm py-8 animate-fade-in">
           <h1 className="text-2xl font-semibold text-gray-800">Create your account</h1>
           <p className="text-gray-600 text-sm mt-1">Start hiring smarter in minutes</p>
@@ -147,6 +210,7 @@ export default function Signup() {
             <Link to="/login" className="text-indigo font-medium hover:underline" data-testid="goto-login">Sign in</Link>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

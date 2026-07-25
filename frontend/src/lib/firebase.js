@@ -25,12 +25,39 @@ const firebaseConfig = {
 };
 
 /**
- * When the config is absent (local dev without the env vars), the app falls
- * back to the legacy password endpoints instead of showing a broken screen.
+ * True only when the REACT_APP_FIREBASE_* build-time vars are present.
+ *
+ * IMPORTANT: Create React App only inlines variables prefixed REACT_APP_.
+ * Setting bare Firebase keys (apiKey, authDomain, projectId, ...) on the host
+ * does NOT work — they are invisible to the built bundle, this stays false, and
+ * the app silently used the legacy password path. That was the root cause of
+ * the "signup bypasses Firebase" report. The warning below makes a repeat of
+ * that misconfiguration loud instead of silent.
  */
 export const isFirebaseConfigured = Boolean(
   firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId
 );
+
+/**
+ * Escape hatch for local development only: set REACT_APP_ALLOW_PASSWORD_FALLBACK
+ * =true to allow the legacy email+password path when Firebase is not
+ * configured. In production leave this unset so a Firebase misconfiguration
+ * fails visibly at signup rather than silently creating a weaker account.
+ */
+export const allowPasswordFallback =
+  String(process.env.REACT_APP_ALLOW_PASSWORD_FALLBACK).toLowerCase() === "true";
+
+if (!isFirebaseConfigured && typeof console !== "undefined") {
+  // eslint-disable-next-line no-console
+  console.error(
+    "[HireFlow] Firebase is NOT configured. Expected REACT_APP_FIREBASE_API_KEY, " +
+      "REACT_APP_FIREBASE_AUTH_DOMAIN and REACT_APP_FIREBASE_PROJECT_ID at build time. " +
+      "Bare names like apiKey/authDomain/projectId are ignored by Create React App. " +
+      (allowPasswordFallback
+        ? "Legacy password auth is enabled (REACT_APP_ALLOW_PASSWORD_FALLBACK=true)."
+        : "Sign-up is disabled until this is fixed.")
+  );
+}
 
 let authPromise = null;
 
@@ -112,12 +139,25 @@ export async function firebaseSignUp(email, password) {
   return cred.user.getIdToken();
 }
 
-/** @returns {Promise<string>} a Firebase ID token to exchange for an app JWT */
+/**
+ * Sign in with email + password and enforce email verification.
+ *
+ * @returns {Promise<{emailVerified: boolean, idToken: string|null}>}
+ *   When the email is not yet verified a fresh verification link is sent, the
+ *   Firebase session is cleared, and idToken is null so the caller shows the
+ *   "verify your email" state instead of proceeding to the dashboard.
+ */
 export async function firebaseSignIn(email, password) {
   const auth = await getAuthInstance();
-  const { signInWithEmailAndPassword } = await import("firebase/auth");
+  const { signInWithEmailAndPassword, sendEmailVerification, signOut } = await import("firebase/auth");
   const cred = await signInWithEmailAndPassword(auth, email, password);
-  return cred.user.getIdToken();
+  if (!cred.user.emailVerified) {
+    try { await sendEmailVerification(cred.user); } catch { /* non-fatal */ }
+    try { await signOut(auth); } catch { /* non-fatal */ }
+    return { emailVerified: false, idToken: null };
+  }
+  const idToken = await cred.user.getIdToken();
+  return { emailVerified: true, idToken };
 }
 
 export async function firebaseSendPasswordReset(email) {
