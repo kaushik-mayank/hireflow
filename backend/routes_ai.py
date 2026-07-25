@@ -46,8 +46,11 @@ def _normalize_structure(parsed: dict, cand: dict) -> dict:
         "name": str(parsed.get("name") or cand.get("name") or ""),
         "headline": str(parsed.get("headline") or ""),
         "contact": {
-            "email": str(contact.get("email") or cand.get("email") or ""),
-            "phone": str(contact.get("phone") or cand.get("phone") or ""),
+            # Prefer the reliably-parsed values (from the PDF mailto:/text
+            # extraction at upload) over the AI's reading of the mangled resume
+            # text, which is where the wrong email in the formatted view came from.
+            "email": str(cand.get("email") or contact.get("email") or ""),
+            "phone": str(cand.get("phone") or contact.get("phone") or ""),
             "location": str(contact.get("location") or ""),
         },
         "links": {
@@ -197,9 +200,8 @@ async def draft_email(body: EmailRequest, user: dict = Depends(get_current_user)
             job.get("jd_text", ""), sender_name,
         ),
     )
-    parsed = ai.parse_ai_json(raw)
-    if not isinstance(parsed, dict):
-        parsed = {"subject": "", "body": raw}
+    # Plain-text parse (emails are no longer JSON — see parse_email_output).
+    parsed = ai.parse_email_output(raw)
     # Return the values used to sign the email so the frontend can offer them as
     # editable fields before the recruiter sends or copies the draft.
     parsed["sender_name"] = sender_name

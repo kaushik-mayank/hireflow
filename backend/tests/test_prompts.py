@@ -178,11 +178,13 @@ def test_questions_prompt_keeps_schema(ai):
     assert "JSON array" in p
 
 
-def test_email_prompt_keeps_schema(ai):
+def test_email_prompt_requests_plain_text_not_json(ai):
+    """Emails are plain text now: a multi-line body as JSON reliably breaks
+    (unescaped newlines -> invalid JSON -> raw dumped into the UI)."""
     p = ai.build_email_prompt("rejection", CANDIDATE, "Forklift Operator", "Acme", FORKLIFT_JD)
-    for key in EMAIL_KEYS:
-        assert f"- {key}" in p
-    assert "JSON object" in p
+    assert "Subject:" in p
+    assert "PLAIN TEXT" in p
+    assert "no JSON" in p
 
 
 def test_summary_prompt_keeps_schema(ai):
@@ -267,8 +269,43 @@ def test_email_prompt_still_works_without_a_jd(ai):
     """jd_text is optional — a job with no description must not break drafting."""
     p = ai.build_email_prompt("interview invite", CANDIDATE, "Chef", "Kitchen Co")
     assert "JOB DESCRIPTION" not in p
-    for key in EMAIL_KEYS:
-        assert f"- {key}" in p
+    assert "Subject:" in p
+
+
+# --------------------------------------------------------------------------
+# Email output parsing (plain text, with JSON fallbacks)
+# --------------------------------------------------------------------------
+
+def test_parse_email_plain_text(ai):
+    raw = "Subject: Interview invitation\n\nHi Mayank,\n\nWe'd love to talk.\n\nBest,\nAastha\nTalentHaze"
+    out = ai.parse_email_output(raw)
+    assert out["subject"] == "Interview invitation"
+    assert out["body"].startswith("Hi Mayank,")
+    assert "TalentHaze" in out["body"]
+    assert "Subject:" not in out["body"]
+
+
+def test_parse_email_json_with_literal_newlines(ai):
+    """The exact reported bug: JSON body with real newlines (invalid JSON)."""
+    raw = '```json\n{\n  "subject": "Invitation to Interview",\n  "body": "Hi Mayank,\n\nWe were impressed.\n\nBest,\nAastha"\n}\n```'
+    out = ai.parse_email_output(raw)
+    assert out["subject"] == "Invitation to Interview"
+    assert out["body"].startswith("Hi Mayank,")
+    assert "```" not in out["body"]
+    assert '"body"' not in out["body"]
+
+
+def test_parse_email_valid_json(ai):
+    raw = '{"subject": "Hello", "body": "Line one\\n\\nLine two"}'
+    out = ai.parse_email_output(raw)
+    assert out["subject"] == "Hello"
+    assert out["body"] == "Line one\n\nLine two"
+
+
+def test_parse_email_no_subject_line_falls_back_to_body(ai):
+    out = ai.parse_email_output("Hi there,\n\nJust a note.")
+    assert out["subject"] == ""
+    assert out["body"].startswith("Hi there,")
 
 
 @pytest.mark.parametrize("system_name", [

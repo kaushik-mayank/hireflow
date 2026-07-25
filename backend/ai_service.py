@@ -92,6 +92,61 @@ def parse_ai_json(text: str):
                 continue
     return None
 
+
+def _json_unescape(s: str) -> str:
+    return (
+        s.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
+    ).strip()
+
+
+def parse_email_output(raw: str) -> dict:
+    """Turn the AI's email response into {subject, body}.
+
+    Emails are requested as PLAIN TEXT ("Subject: …" then a blank line then the
+    body) because a multi-line email as JSON reliably breaks: models emit real
+    newlines inside the JSON string, which is invalid JSON, and the raw fenced
+    text then leaks into the UI. This parser handles the plain-text format and
+    still recovers subject/body if a model returns JSON anyway (valid or with
+    unescaped newlines).
+    """
+    if not raw:
+        return {"subject": "", "body": ""}
+
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text).strip()
+
+    # JSON, if the model ignored the plain-text instruction.
+    if text.lstrip().startswith("{"):
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                return {
+                    "subject": str(obj.get("subject", "")).strip(),
+                    "body": str(obj.get("body", "")).strip(),
+                }
+        except Exception:
+            subj = re.search(r'"subject"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+            body = re.search(r'"body"\s*:\s*"(.*)"\s*\}?\s*$', text, re.DOTALL)
+            if subj or body:
+                return {
+                    "subject": _json_unescape(subj.group(1)) if subj else "",
+                    "body": _json_unescape(body.group(1)) if body else "",
+                }
+
+    # Plain-text "Subject: …" format (the expected path).
+    lines = text.splitlines()
+    if lines and lines[0].strip().lower().startswith("subject:"):
+        subject = lines[0].split(":", 1)[1].strip()
+        rest = lines[1:]
+        while rest and not rest[0].strip():
+            rest.pop(0)
+        return {"subject": subject, "body": "\n".join(rest).strip()}
+
+    # Last resort: no subject line found — treat the whole thing as the body.
+    return {"subject": "", "body": text}
+
 COST_TABLE = {
     "rank":            {"tokens": 3000, "cost": 0.003},
     "questions":       {"tokens": 1500, "cost": 0.0015},
@@ -321,21 +376,24 @@ Do not invent specifics — no interview times, pay figures, locations or start 
 they appear above. Where a concrete detail is needed but unknown, leave a clearly marked
 placeholder in square brackets for the sender to fill in.
 
-FORMAT THE BODY as a real email with clear separation, NOT one continuous block. Use these
-parts, each separated by a BLANK LINE (a literal \\n\\n between them):
-  1. A greeting line addressed to the candidate by name (e.g. "Hi {candidate.get('name') or 'there'},").
-  2. One or two short body paragraphs, each its own paragraph separated by a blank line.
-  3. A brief closing line.
-  4. A signature block on its own lines: a sign-off (e.g. "Best regards,"), then "{signer}",
-     then "{org}".
-Address the candidate and sign off with the real names given above — do not leave the
-name or organisation as a placeholder.
+Return the email as PLAIN TEXT — no JSON, no markdown, no code fences — in exactly this shape:
 
-Return ONLY a JSON object with:
-- subject: the email subject line
-- body: the full email body as plain text, with real newlines between the parts as described
+Subject: <one concise subject line>
 
-No prose, no markdown."""
+<greeting addressed to the candidate by name, e.g. "Hi {candidate.get('name') or 'there'},">
+
+<one or two short body paragraphs, separated by a blank line>
+
+<a brief closing line>
+
+<a sign-off such as "Best regards,">
+{signer}
+{org}
+
+Put a real blank line between each part so the message reads as a proper email, not one
+block. Address the candidate and sign off with the real names above — never leave a name or
+organisation as a placeholder. The first line MUST start with "Subject: " and be followed by
+a blank line before the greeting."""
 
 
 COMPARE_SYSTEM = (
