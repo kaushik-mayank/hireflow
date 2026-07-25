@@ -4,8 +4,39 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Post-launch hardening pass (9-item list). 5 of 9 done; 4 remaining.
+**Current phase:** Post-launch hardening pass (9-item list) — ✅ ALL 9 DONE.
 **Last updated:** 2026-07-25
+
+---
+
+## Session 11 — 2026-07-25 — Live-testing hardening: remaining 4 items
+
+Completed #1, #3, #4, #5 (2 and 6–9 were done in Session 10). All 9 items done.
+
+| # | Item | Commit summary |
+|---|---|---|
+| 1 | Marketing placeholders + support email | `hireflow@cortinix.com` from one constant (SUPPORT_EMAIL in constants.js) used in About/Careers/Privacy/Signup/ErrorBoundary. All PlaceholderNote/owner-facing warnings removed incl. the Privacy "legal review" banner. **Fake testimonials emptied** rather than shown as real (fabrication avoided) — pages have honest empty states. |
+| 3 | Resume source | Single config `src/config/sources.js` (11 sources w/ icon+colour). Mandatory dropdown at upload (client + server 400). `SourceBadge` on candidate list rows and profile header. Source filter in the list. Legacy values fall back via `sourceMeta()`. |
+| 4 | Resume parsing | **Root-caused the email bug**: PDF text-extraction glues adjacent words, greedy regex eats them. Fixed by preferring the exact address from the embedded `mailto:` annotation. New `resume_parser.py`: PDF (text+annotations), DOCX (python-docx), TXT, images (best-effort OCR only if a free stack is present). Extracts + classifies LinkedIn/GitHub/portfolio. Upload accepts PDF/DOCX/DOC/TXT/PNG/JPG/WEBP. 10 parser tests incl. the exact `pedksmayank03`→`dksmayank03` case. |
+| 5 | Resume viewer | AI structures the resume into compact JSON **once, cached on first view** (`POST /ai/structure`) — cost-efficient. `ResumeView` renders one consistent, printable layout; Print/Save-PDF via a hidden print-only clone + `@media print`. Raw text kept as fallback. |
+
+### #2 Firebase (Session 10) — owner has since renamed the Render env vars
+Owner confirmed the `REACT_APP_FIREBASE_*` rename is done. Once the frontend rebuilds, the silent legacy fallback stops and Firebase + email verification are enforced.
+
+### Verified this session
+- **182 offline tests pass** (118 prompts + 31 reports + 23 admin + 10 parser).
+- `CI=true yarn build` clean after every commit.
+- No `@example.com` / placeholder strings remain in `src`.
+
+### ⚠️ Still not run end-to-end
+No browser, backend, Firebase, SMTP or Groq key in this environment, so as before: nothing has been executed live. The AI-dependent paths (resume structuring, email drafting) are unit-tested at the prompt/normalisation level but the actual model calls are unrun.
+
+### Owner to-dos / decisions carried
+- **OCR**: left optional (free Tesseract path activates only if the host has it; `pytesseract`/`Pillow` are commented in requirements). No cloud provider wired, per "use a free lib if available, otherwise leave it."
+- **`python-docx` added to requirements** — will install on next deploy.
+- **Feedback inbox** `connecting800@gmail.com` left as-is (delivery config, not a user-facing support address). Say if it should become `hireflow@cortinix.com`.
+- Privacy policy still merits a real legal review even though the on-page owner banner is gone.
+- `.doc` (legacy binary Word) is accepted but not text-extractable by python-docx — stores blank text for manual entry.
 
 ---
 
