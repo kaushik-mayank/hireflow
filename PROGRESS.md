@@ -4,8 +4,59 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🏁 **Phases 0–7 complete.** Outstanding items are listed under "Handover" below.
-**Last updated:** 2026-07-23
+**Current phase:** Post-launch hardening pass (9-item list). 5 of 9 done; 4 remaining.
+**Last updated:** 2026-07-25
+
+---
+
+## Session 10 — 2026-07-25 — Live-testing hardening (9-item request)
+
+Owner supplied a 9-item list preparing for live user testing. Status:
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Remove marketing placeholders; support email → hireflow@cortinix.com | ⬜ TODO (unblocked) |
+| 2 | Firebase auth bypass | ✅ DONE |
+| 3 | Resume source: mandatory, single config, badges, filter | ⬜ TODO (unblocked) |
+| 4 | Resume parsing: email bug, DOCX, links, OCR | ⬜ PARTIAL PLAN — non-OCR doable now; **OCR = cloud API, needs provider + key from owner** |
+| 5 | Resume viewer from structured data | ⬜ TODO — approach chosen: **AI structured parse at upload** |
+| 6 | JD Original/Enhanced tab bug | ✅ DONE |
+| 7 | Candidate name → profile navigation | ✅ DONE |
+| 8 | AI email formatting + auto-populate org/sender | ✅ DONE |
+| 9 | Auto-scroll to generated AI content | ✅ DONE |
+
+### #6/#7/#8/#9 — commit `<candidate-flow>`
+Root causes + fixes in the commit message. Highlights: #6 was JobCreate overwriting `jd_text` with the enhanced text (original lost, Enhanced tab disabled) — now stored alongside as `jd_enhanced`. #8 email prompt now enforces greeting/paragraphs/signature with real org+sender, and the modal is controlled/editable.
+
+### #2 Firebase — commit `<firebase-fix>` — ROOT CAUSE FOUND
+**The env vars on Render were named `apiKey`, `authDomain`, `projectId`, … — bare Firebase keys.** CRA only inlines `REACT_APP_*`-prefixed vars, so they were invisible to the build, `isFirebaseConfigured` was false, and signup silently fell back to legacy bcrypt (→ instant dashboard, no Firebase). This is why "the issue existed even after setting the env variables."
+
+Owner delegated the policy choice ("analyse and choose best option"). Chosen: **enforce Firebase + verified email**, keep legacy login for demo/admin.
+- Frontend: loud console error when unconfigured; signup no longer silently creates bcrypt accounts (fails visibly unless `REACT_APP_ALLOW_PASSWORD_FALLBACK=true`); `firebaseSignIn` blocks unverified users and resends the link; new "verify your email" signup screen with resend.
+- Backend `/auth/firebase`: saves name+company on any valid token but withholds the JWT until verified (`{verified:false}`), gated by `REQUIRE_EMAIL_VERIFICATION` (default true). Legacy `/auth/login` untouched → demo/admin unaffected.
+
+### ⚠️ Owner must do — the actual fix for #2
+Rename the Render **frontend** env vars (then rebuild):
+| Current (wrong) | Correct |
+|---|---|
+| `apiKey` | `REACT_APP_FIREBASE_API_KEY` |
+| `authDomain` | `REACT_APP_FIREBASE_AUTH_DOMAIN` |
+| `projectId` | `REACT_APP_FIREBASE_PROJECT_ID` |
+| `storageBucket` | `REACT_APP_FIREBASE_STORAGE_BUCKET` |
+| `messagingSenderId` | `REACT_APP_FIREBASE_MESSAGING_SENDER_ID` |
+| `appId` | `REACT_APP_FIREBASE_APP_ID` |
+| `measurementId` | `REACT_APP_FIREBASE_MEASUREMENT_ID` |
+
+Backend service also needs `FIREBASE_PROJECT_ID` (token verification) and optionally `REQUIRE_EMAIL_VERIFICATION=true`.
+
+### Remaining plan
+- **#1** marketing placeholders + `hireflow@cortinix.com` everywhere. Unblocked.
+- **#3** source: replace free-text with a mandatory predefined list (single config module: LinkedIn, Indeed, Naukri, Company Careers Page, Employee Referral, Recruitment Agency, Offline Database, Walk-in, Campus Hiring, Internal Database, Other), store, badge in list, filter. Map old free-text values to "Other"/"Unknown".
+- **#4** email regex fix (embedded `mailto:` link annotations via pypdf), DOCX (`python-docx`), extract hyperlinked LinkedIn/GitHub/portfolio from PDF annotations. **OCR blocked** on owner picking a cloud OCR provider + API key.
+- **#5** viewer: one AI call at upload → compact structured JSON (contact/summary/experience/education/skills/links) stored on the candidate; a consistent printable React viewer renders it. Raw text kept as fallback.
+
+### Verified this session
+Backend compiles; 172 offline tests pass; `CI=true yarn build` clean after each batch. Nothing run end-to-end (no browser/backend/Firebase in this environment).
 
 ---
 
