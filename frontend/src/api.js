@@ -14,7 +14,14 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response && err.response.status === 401) {
+    const url = err.config?.url || "";
+    const isAuthRequest = url.includes("/auth/");
+    const hadSession = Boolean(localStorage.getItem("hireflow_token"));
+    // Only bounce to /login when a genuinely authenticated session expires.
+    // A 401 from the login/signup/firebase calls themselves must reject so the
+    // page can show the real error — otherwise the redirect reloads the page
+    // and hides why sign-in failed (this masked a backend Firebase 401).
+    if (err.response && err.response.status === 401 && !isAuthRequest && hadSession) {
       localStorage.removeItem("hireflow_token");
       if (!window.location.pathname.startsWith("/login")) {
         window.location.href = "/login";

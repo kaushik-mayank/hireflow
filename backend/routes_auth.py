@@ -102,6 +102,18 @@ async def firebase_exchange(body: FirebaseAuthRequest, request: Request):
 
     Accounts created here are always `hr`. Admin comes only from the allowlist.
     """
+    # Distinguish a server misconfiguration from a bad token: a 503 with a clear
+    # message is far easier to diagnose than a generic 401, and it can't be
+    # mistaken for "session expired". This is the case that fires when the
+    # backend is missing FIREBASE_PROJECT_ID (the plain var, not REACT_APP_*).
+    if not firebase_auth.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Firebase sign-in isn't configured on the server. Set FIREBASE_PROJECT_ID "
+                "(no REACT_APP_ prefix) on the backend to your Firebase project id."
+            ),
+        )
     try:
         claims = firebase_auth.verify_id_token(body.id_token)
     except firebase_auth.FirebaseAuthError as exc:
