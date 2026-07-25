@@ -8,6 +8,10 @@ import { STAGES, fmtDate } from "@/constants";
 import { CANDIDATE_SOURCES } from "@/config/sources";
 import { toast } from "sonner";
 
+// Accepted resume file types (kept in step with the backend allow-list).
+const ACCEPTED_EXTS = /\.(pdf|docx|doc|txt|png|jpe?g|webp)$/i;
+const ACCEPT_ATTR = ".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.webp";
+
 export default function JobDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -56,9 +60,9 @@ export default function JobDetail() {
       toast.error("Please choose where these candidates came from before uploading");
       return;
     }
-    const files = Array.from(fileList).filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
+    const files = Array.from(fileList).filter((f) => ACCEPTED_EXTS.test(f.name));
     if (files.length === 0) {
-      toast.error("Only PDF files are accepted");
+      toast.error("Accepted files: PDF, Word (DOCX/DOC), images (PNG/JPG) or TXT");
       return;
     }
     const tooBig = files.find((f) => f.size > 5 * 1024 * 1024);
@@ -177,10 +181,10 @@ export default function JobDetail() {
             onClick={() => fileRef.current?.click()}
             data-testid="upload-zone"
           >
-            <input ref={fileRef} type="file" accept="application/pdf" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} data-testid="upload-input" />
+            <input ref={fileRef} type="file" accept={ACCEPT_ATTR} multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} data-testid="upload-input" />
             {uploading ? <Spinner size={22} className="mx-auto text-indigo" /> : <Upload size={22} className="mx-auto text-gray-400" />}
-            <p className="text-sm text-gray-700 mt-2 font-medium">{uploading ? "Uploading..." : "Drop PDF resumes here or click to browse"}</p>
-            <p className="text-xs text-gray-400 mt-1">Multiple PDFs · max 5MB each</p>
+            <p className="text-sm text-gray-700 mt-2 font-medium">{uploading ? "Uploading..." : "Drop resumes here or click to browse"}</p>
+            <p className="text-xs text-gray-400 mt-1">PDF, Word, images or text · multiple · max 5MB each</p>
           </div>
         </Card>
 

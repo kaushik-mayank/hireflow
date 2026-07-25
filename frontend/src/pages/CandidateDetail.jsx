@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Mail, Phone, ChevronDown, ChevronUp, Sparkles, FileText, GitCompare, MessageSquareText, Send, XCircle } from "lucide-react";
+import { ArrowLeft, Mail, Phone, ChevronDown, ChevronUp, Sparkles, FileText, GitCompare, MessageSquareText, Send, XCircle, Linkedin, Github, Link as LinkIcon } from "lucide-react";
 import { candidatesApi, aiApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Modal, Spinner, Skeleton, SourceBadge } from "@/components/ui";
@@ -116,6 +116,13 @@ export default function CandidateDetail() {
                     {cand.phone && <span className="flex items-center gap-1"><Phone size={14} /> {cand.phone}</span>}
                     <SourceBadge source={cand.source} />
                   </div>
+                  {(cand.linkedin || cand.github || cand.portfolio) && (
+                    <div className="flex flex-wrap items-center gap-3 mt-2 text-sm">
+                      {cand.linkedin && <a href={cand.linkedin} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-indigo hover:underline"><Linkedin size={14} /> LinkedIn</a>}
+                      {cand.github && <a href={cand.github} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-indigo hover:underline"><Github size={14} /> GitHub</a>}
+                      {cand.portfolio && <a href={cand.portfolio} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-indigo hover:underline"><LinkIcon size={14} /> Portfolio</a>}
+                    </div>
+                  )}
                   <button onClick={() => navigate(`/jobs/${cand.job_id}`)} className="text-sm text-indigo hover:underline mt-2">{cand.job?.title}</button>
                 </div>
               </div>

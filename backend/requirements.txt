@@ -29,7 +29,16 @@ bcrypt==4.1.3                # legacy password hashing
 python-dotenv>=1.0.1
 
 # --- Documents ---
-pypdf>=6.0.0                 # resume text extraction
+pypdf>=6.0.0                 # PDF text + embedded link annotations
+python-docx>=1.1.0           # DOCX text + hyperlink extraction
+
+# --- Optional OCR (images / scanned PDFs) ---
+# Not installed by default. resume_parser uses these only if importable AND the
+# Tesseract binary is present, otherwise image uploads store without text. To
+# enable: `pip install pytesseract Pillow` and install the Tesseract system
+# binary (e.g. apt-get install tesseract-ocr, or a Render Docker/aptfile step).
+# pytesseract>=0.3.10
+# Pillow>=10.0.0
 
 # --- AI ---
 groq>=0.9.0

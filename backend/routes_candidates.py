@@ -1,14 +1,13 @@
 import os
 import re
 import uuid
-import io
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from pypdf import PdfReader
 
 from database import jobs, candidates, stage_transitions, UPLOAD_DIR
 from auth import get_current_user
 from models import StageUpdate, NoteUpdate, BulkStageUpdate
+import resume_parser
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -24,17 +23,10 @@ HIRED_STAGE = "Selected"
 # created before the field became mandatory.
 UNKNOWN_SOURCE = "Unknown"
 
-EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-PHONE_RE = re.compile(r"(\+?\d[\d\s().-]{7,}\d)")
-
-
-def extract_pdf_text(content: bytes) -> str:
-    try:
-        reader = PdfReader(io.BytesIO(content))
-        text = "\n".join((page.extract_text() or "") for page in reader.pages)
-        return text.strip()
-    except Exception:
-        return ""
+# Accepted resume file types. PDF/DOCX/TXT extract natively; images use OCR when
+# a free OCR stack is available on the host, otherwise they store without text.
+ALLOWED_EXTENSIONS = resume_parser.SUPPORTED_EXTENSIONS
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
 def _looks_like_name(line: str) -> bool:
@@ -74,27 +66,37 @@ async def upload_resumes(
 
     created = []
     for f in files:
-        if not f.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=400, detail=f"{f.filename} is not a PDF")
+        ext = os.path.splitext(f.filename or "")[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{f.filename}: unsupported type. Accepted: PDF, DOCX, DOC, TXT, PNG, JPG.",
+            )
         content = await f.read()
-        if len(content) > 5 * 1024 * 1024:
+        if len(content) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail=f"{f.filename} exceeds 5MB")
 
-        text = extract_pdf_text(content)
-        stored_name = f"{uuid.uuid4()}.pdf"
+        parsed = resume_parser.extract_document(content, f.filename)
+        text = parsed["text"]
+
+        # Keep the original file on disk under a safe stored name (extension preserved).
+        stored_name = f"{uuid.uuid4()}{ext}"
         with open(UPLOAD_DIR / stored_name, "wb") as out:
             out.write(content)
 
-        email_match = EMAIL_RE.search(text)
-        phone_match = PHONE_RE.search(text)
         now = datetime.now(timezone.utc).isoformat()
         cand = {
             "id": str(uuid.uuid4()),
             "job_id": job_id,
             "name": guess_name(text, f.filename),
-            "email": email_match.group(0) if email_match else None,
-            "phone": phone_match.group(0).strip() if phone_match else None,
-            "resume_text": text or "(Could not extract text from PDF)",
+            "email": parsed["email"],
+            "phone": parsed["phone"],
+            "resume_text": text or "(Could not extract text from this file)",
+            # Embedded hyperlinks pulled from the document (annotations/relationships).
+            "links": parsed["links"],
+            "linkedin": parsed["linkedin"],
+            "github": parsed["github"],
+            "portfolio": parsed["portfolio"],
             "pdf_path": stored_name,
             "pdf_original_name": f.filename,
             "source": clean_source,
