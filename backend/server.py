@@ -32,20 +32,41 @@ logger = logging.getLogger(__name__)
 # ----------------------------
 # CORS configuration
 # ----------------------------
-# Browsers reject `Access-Control-Allow-Origin: *` together with
-# `Allow-Credentials: true`, so the previous default of "*" with credentials on
-# was a silent trap: it worked only because CORS_ORIGINS happened to be set.
-# Credentials are now enabled only when explicit origins are listed.
-_raw_origins = os.environ.get("CORS_ORIGINS", "").strip()
-CORS_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
-ALLOW_CREDENTIALS = bool(CORS_ORIGINS) and "*" not in CORS_ORIGINS
+# This API authenticates with bearer tokens in the Authorization header, NOT
+# cookies, so credentialed CORS is unnecessary (allow_credentials=False). That
+# makes allowing origins liberally safe: a cross-origin page still cannot read
+# another origin's stored token. It also removes the "*" + credentials trap that
+# browsers reject outright.
+#
+# The effective allow-list is the known production/local origins BELOW, plus
+# anything in the CORS_ORIGINS env var (comma-separated), plus CORS_ORIGIN_REGEX
+# (env). The known origins are baked in so a frontend domain change can never
+# again silently break every API call. Trailing slashes are ignored.
+KNOWN_ORIGINS = [
+    "https://hireflow.cortinix.com",
+    "https://hireflow-green.vercel.app",
+    "http://localhost:3000",
+]
+_env_origins = [
+    o.strip().rstrip("/")
+    for o in os.environ.get("CORS_ORIGINS", "").split(",")
+    if o.strip()
+]
 
-if not CORS_ORIGINS:
+if "*" in _env_origins:
     CORS_ORIGINS = ["*"]
-    logger.warning(
-        "CORS_ORIGINS is not set — allowing all origins with credentials disabled. "
-        "Set it to your frontend URL(s) in production."
-    )
+else:
+    # Dedupe while preserving order.
+    CORS_ORIGINS = list(dict.fromkeys(KNOWN_ORIGINS + _env_origins))
+
+# Allow Vercel preview deployments (hireflow-*.vercel.app) by default; override
+# with the CORS_ORIGIN_REGEX env var if needed.
+CORS_ORIGIN_REGEX = (
+    os.environ.get("CORS_ORIGIN_REGEX", "").strip()
+    or r"https://([a-z0-9-]+\.)*vercel\.app"
+)
+
+logger.info("CORS allowed origins: %s (regex: %s)", CORS_ORIGINS, CORS_ORIGIN_REGEX)
 
 
 # ----------------------------
@@ -126,8 +147,9 @@ app.include_router(api_router)
 # ----------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=ALLOW_CREDENTIALS,
+    allow_credentials=False,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )

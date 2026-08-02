@@ -4,8 +4,37 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Post-launch bug fixes (live on Vercel frontend + Render backend).
+**Current phase:** Post-launch bug fixes. Live: frontend `https://hireflow.cortinix.com` (Vercel custom domain), backend `https://hireflow-w04l.onrender.com` (Render).
 **Last updated:** 2026-08-02
+
+---
+
+## Session 16 — 2026-08-02 — CORS: verified user still can't log in
+
+### Symptom / console
+`Access to XMLHttpRequest at 'https://hireflow-w04l.onrender.com/api/auth/firebase' from origin 'https://hireflow.cortinix.com' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header`. Also on `/api/auth/login`. A Firebase `signInWithPassword` 400 appeared on some attempts (a wrong-password/earlier-double-signup attempt — secondary).
+
+### Root cause
+The Render backend's `CORS_ORIGINS` did not include the live frontend origin `https://hireflow.cortinix.com` (they moved to a custom domain). Every browser API call — including the token exchange — was blocked, so a verified user with the right password still couldn't finish login. **This also confirms the Session-15 fix worked**: the app now reports the real problem ("trouble reaching the server") instead of a fake "invalid password".
+
+### Fix (permanent, in code — `server.py`)
+Key realisation: this API uses **bearer tokens (Authorization header), not cookies**, so credentialed CORS is unnecessary. Therefore:
+- `allow_credentials=False` — removes the `*`+credentials trap and makes liberal origins safe (a cross-origin page can't read another origin's stored token).
+- **Known production/local origins are baked into the code** (`hireflow.cortinix.com`, the Vercel app, `localhost:3000`) and merged with `CORS_ORIGINS` env — so a frontend domain change can never again silently break every call. The real frontend is allowed **even if the Render env is stale or empty**.
+- `CORS_ORIGIN_REGEX` support, defaulting to `*.vercel.app` (preview deploys). Trailing slashes normalised.
+- Verified the resolution logic in isolation: cortinix allowed with stale/empty env, vercel previews + localhost allowed, trailing-slash matches, unknown origins still blocked.
+
+### Files changed
+- `backend/server.py` — CORS config + middleware.
+- `backend/.env.example` — CORS docs.
+
+### Owner action
+- **Redeploy the backend (Render).** That alone fixes it — no env change required (the origin is baked in). Optionally set `CORS_ORIGINS`/`CORS_ORIGIN_REGEX` for extra domains.
+- If, after the CORS fix, a specific account still shows "email or password isn't correct" (Firebase 400), that account's Firebase password is likely from an earlier confused double-signup — use **Forgot password** to set a known one, or delete + recreate the Firebase user.
+
+### Testing
+- `server.py` compiles; CORS logic unit-verified in isolation; 186 backend tests unaffected.
+- ⚠️ Not run against the live Render/browser — owner redeploys backend and confirms login.
 
 ---
 
