@@ -55,13 +55,13 @@ export default function Login() {
       }
 
       if (!result.emailVerified) {
-        setError("Please verify your email first — we've sent you a new verification link. Check your inbox, then sign in.");
+        setError("Please verify your email to continue. We've sent a new verification link to your inbox — open it, then sign in. If you've just verified, give it a moment and try again.");
         return;
       }
 
       const res = await authApi.firebase({ id_token: result.idToken });
       if (!res.data.verified || !res.data.token) {
-        setError("Please verify your email first, then sign in.");
+        setError("Your email verification is still being confirmed. Please wait a moment and try signing in again.");
         return;
       }
       login(res.data.token, res.data.user);

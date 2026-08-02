@@ -151,12 +151,23 @@ export async function firebaseSignIn(email, password) {
   const auth = await getAuthInstance();
   const { signInWithEmailAndPassword, sendEmailVerification, signOut } = await import("firebase/auth");
   const cred = await signInWithEmailAndPassword(auth, email, password);
+
+  // Pull the latest account state from Firebase before checking verification.
+  // Right after a user clicks the verification link, `emailVerified` on the
+  // signed-in user object can still be stale (false); reload() fetches the
+  // current server state so a just-verified user isn't wrongly blocked.
+  try { await cred.user.reload(); } catch { /* non-fatal — fall back to the current value */ }
+
   if (!cred.user.emailVerified) {
     try { await sendEmailVerification(cred.user); } catch { /* non-fatal */ }
     try { await signOut(auth); } catch { /* non-fatal */ }
     return { emailVerified: false, idToken: null };
   }
-  const idToken = await cred.user.getIdToken();
+
+  // Force a fresh ID token so the backend's email_verified claim is current
+  // too — a cached token would still carry email_verified: false and the
+  // backend would reject an otherwise-verified user.
+  const idToken = await cred.user.getIdToken(true);
   return { emailVerified: true, idToken };
 }
 

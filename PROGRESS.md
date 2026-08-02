@@ -4,8 +4,46 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Post-launch hardening pass (9-item list) — ✅ ALL 9 DONE.
-**Last updated:** 2026-07-25
+**Current phase:** Post-launch bug fixes (live on Vercel frontend + Render backend).
+**Last updated:** 2026-08-02
+
+---
+
+## Session 14 — 2026-08-02 — Fix: verified users wrongly told "please verify"
+
+### Symptom
+New user signs up → verifies via the Firebase email link → returns and signs in → login incorrectly says "Please verify your email."
+
+### Root cause (Firebase staleness, two points in `firebaseSignIn`)
+`frontend/src/lib/firebase.js` `firebaseSignIn` read verification state without refreshing it:
+1. **`cred.user.emailVerified` was read straight off `signInWithEmailAndPassword`** with no `reload()`. Right after the verification link is clicked, that property lags the server (stale `false`), so a just-verified user was blocked. **Primary trigger.**
+2. **`getIdToken()` (no force-refresh)** could return the token minted at sign-in, whose `email_verified` claim is still `false`. The backend gates on `claims["email_verified"]`, so even if (1) passed it returned `{verified:false}` → same wrong message.
+
+The app's own session is its JWT in AuthContext/localStorage (not Firebase `onAuthStateChanged`), so there was no listener-staleness angle — the bug was exactly these two reads.
+
+### Fix (minimal, frontend-only, correct Firebase practice)
+`firebaseSignIn` now:
+- `await cred.user.reload()` before checking `emailVerified` (fetches current server state). Wrapped in try/catch → falls back to the un-reloaded value if reload fails.
+- `getIdToken(true)` (force refresh) so the backend receives a token with the current `email_verified` claim.
+
+No backend change needed — with a fresh token the existing `claims["email_verified"]` gate returns verified for a verified user.
+
+### Messages improved (Phase 6, jargon-free)
+`Login.jsx`:
+- Unverified: "Please verify your email to continue. We've sent a new verification link to your inbox — open it, then sign in. **If you've just verified, give it a moment and try again.**"
+- Backend-mismatch (now very rare): "Your email verification is still being confirmed. Please wait a moment and try signing in again." (was "Please verify your email first, then sign in.")
+
+### Files changed
+- `frontend/src/lib/firebase.js` — `firebaseSignIn`: add `reload()` + `getIdToken(true)`.
+- `frontend/src/pages/Login.jsx` — two verification messages.
+
+### Testing performed
+- `CI=true yarn build` clean.
+- Reasoned through the 4 scenarios (can't run Firebase locally): A verified-then-login now passes via reload(); B verify-then-immediate-login fixed by reload() hitting the server; C existing verified user unaffected (demo/admin still use the legacy fallback path); D genuinely-unverified user still correctly blocked + resent a link.
+- ⚠️ Not run end-to-end (no Firebase project/browser here). **Owner must deploy the frontend and confirm the real verify→login journey.**
+
+### Remaining note
+Only the frontend needs redeploying (Vercel). Backend unchanged.
 
 ---
 
