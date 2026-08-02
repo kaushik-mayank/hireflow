@@ -4,6 +4,7 @@ import { Hexagon, Mail, Lock, ArrowRight } from "lucide-react";
 import { authApi, apiErr } from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Spinner } from "@/components/ui";
+import { pendingCompanyKey } from "@/constants";
 import {
   isFirebaseConfigured, firebaseSignIn, firebaseErrorMessage, shouldTryLegacyLogin,
 } from "@/lib/firebase";
@@ -35,6 +36,7 @@ export default function Login() {
         return;
       }
 
+      // Step 1 — authenticate with Firebase. Credential problems are reported here.
       let result;
       try {
         result = await firebaseSignIn(email, password);
@@ -46,11 +48,11 @@ export default function Login() {
             await legacyLogin();
             return;
           } catch {
-            setError("Invalid email or password");
+            setError("That email or password isn't correct.");
             return;
           }
         }
-        setError(firebaseErrorMessage(fbErr, "Could not sign you in"));
+        setError(firebaseErrorMessage(fbErr, "We couldn't sign you in. Please try again."));
         return;
       }
 
@@ -59,15 +61,30 @@ export default function Login() {
         return;
       }
 
-      const res = await authApi.firebase({ id_token: result.idToken });
-      if (!res.data.verified || !res.data.token) {
-        setError("Your email verification is still being confirmed. Please wait a moment and try signing in again.");
-        return;
+      // Step 2 — exchange the verified token for an app session. A failure here
+      // is a server/connection problem, NOT a wrong password, so it must not be
+      // reported as a credential error.
+      const companyKey = pendingCompanyKey(email);
+      let pendingCompany;
+      try { pendingCompany = localStorage.getItem(companyKey) || undefined; } catch { /* ignore */ }
+
+      try {
+        const res = await authApi.firebase({ id_token: result.idToken, company: pendingCompany });
+        if (!res.data.verified || !res.data.token) {
+          setError("Your email verification is still being confirmed. Please wait a moment and try signing in again.");
+          return;
+        }
+        try { localStorage.removeItem(companyKey); } catch { /* ignore */ }
+        login(res.data.token, res.data.user);
+        navigate("/dashboard");
+      } catch (exchangeErr) {
+        setError(
+          exchangeErr?.response?.data?.detail ||
+            "We're having trouble reaching the server right now. Please try again in a moment."
+        );
       }
-      login(res.data.token, res.data.user);
-      navigate("/dashboard");
     } catch (err) {
-      setError(apiErr(err, "Invalid email or password"));
+      setError(apiErr(err, "We couldn't sign you in. Please try again."));
     } finally {
       setLoading(false);
     }

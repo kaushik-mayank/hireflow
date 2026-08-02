@@ -2,6 +2,12 @@
 // the marketing pages, auth pages and the error boundary so it changes in one place.
 export const SUPPORT_EMAIL = "hireflow@cortinix.com";
 
+// Signup only talks to Firebase, so the optional company is stashed here and
+// picked up at the first verified login to persist it on the app account.
+export function pendingCompanyKey(email) {
+  return `hf_pending_company:${(email || "").trim().toLowerCase()}`;
+}
+
 export const STAGES = [
   "Applied",
   "AI Ranked",

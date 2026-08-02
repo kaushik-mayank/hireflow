@@ -4,10 +4,10 @@ import { Hexagon, ArrowRight, MailCheck } from "lucide-react";
 import { authApi, apiErr } from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Spinner } from "@/components/ui";
-import { SUPPORT_EMAIL } from "@/constants";
+import { SUPPORT_EMAIL, pendingCompanyKey } from "@/constants";
 import {
   isFirebaseConfigured, allowPasswordFallback, firebaseSignUp, firebaseSignIn,
-  firebaseSignOut, firebaseErrorMessage,
+  firebaseErrorMessage,
 } from "@/lib/firebase";
 
 function strength(pw) {
@@ -51,32 +51,22 @@ export default function Signup() {
 
     try {
       if (isFirebaseConfigured) {
-        let idToken;
+        // Signup only talks to Firebase. Once Firebase accepts, the account
+        // exists and the verification email is on its way, so we always show the
+        // "verify your email" screen. The app/DB account is created on the first
+        // verified login — a backend hiccup here can never report a created
+        // account as failed (which used to trap the user on retry).
         try {
-          idToken = await firebaseSignUp(form.email, form.password);
+          await firebaseSignUp(form.name, form.email, form.password);
         } catch (fbErr) {
-          setServerError(firebaseErrorMessage(fbErr, "Could not create account"));
+          setServerError(firebaseErrorMessage(fbErr, "Could not create your account. Please try again."));
           return;
         }
-        // Persist the account (name + company) but do NOT enter the dashboard:
-        // the backend withholds a session until the email is verified, returning
-        // { verified: false }. Sign the fresh Firebase session out so an
-        // unverified user isn't left signed in.
-        try {
-          const res = await authApi.firebase({
-            id_token: idToken, name: form.name, company: form.company,
-          });
-          await firebaseSignOut();
-          if (res.data.verified && res.data.token) {
-            login(res.data.token, res.data.user);
-            navigate("/dashboard");
-          } else {
-            setVerifySent(true);
-          }
-        } catch (err) {
-          await firebaseSignOut();
-          setServerError(apiErr(err, "Could not create account"));
+        // Carry the optional company to the first login, where it's persisted.
+        if (form.company.trim()) {
+          try { localStorage.setItem(pendingCompanyKey(form.email), form.company.trim()); } catch { /* ignore */ }
         }
+        setVerifySent(true);
       } else if (allowPasswordFallback) {
         // Local dev only, gated by REACT_APP_ALLOW_PASSWORD_FALLBACK=true.
         const res = await authApi.signup({
@@ -93,7 +83,7 @@ export default function Signup() {
         );
       }
     } catch (err) {
-      setServerError(apiErr(err, "Could not create account"));
+      setServerError(apiErr(err, "Could not create your account. Please try again."));
     } finally {
       setLoading(false);
     }

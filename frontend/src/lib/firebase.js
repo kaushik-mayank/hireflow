@@ -123,20 +123,31 @@ export function firebaseErrorMessage(err, fallback = "Something went wrong. Plea
 }
 
 /**
- * Create the account and send a verification email.
- * @returns {Promise<string>} a Firebase ID token to exchange for an app JWT
+ * Create the Firebase account, attach the display name, send a verification
+ * email, and sign the (unverified) user out so they must verify before their
+ * first sign-in.
+ *
+ * Deliberately does NOT talk to our backend. The app account is created lazily
+ * on the first verified login, so signup succeeds or fails purely on Firebase —
+ * a backend/network hiccup can never leave a created Firebase account reported
+ * as "couldn't create account" (which then traps the user on retry with
+ * "email already exists"). The name travels to the backend via the token's
+ * `name` claim; the optional company is carried by the caller for first login.
+ *
+ * @returns {Promise<void>} resolves once the account exists and the email is sent.
  */
-export async function firebaseSignUp(email, password) {
+export async function firebaseSignUp(name, email, password) {
   const auth = await getAuthInstance();
-  const { createUserWithEmailAndPassword, sendEmailVerification } = await import("firebase/auth");
+  const { createUserWithEmailAndPassword, updateProfile, sendEmailVerification, signOut } =
+    await import("firebase/auth");
   const cred = await createUserWithEmailAndPassword(auth, email, password);
-  // A failed verification email must not block a successful signup.
-  try {
-    await sendEmailVerification(cred.user);
-  } catch {
-    /* ignore */
+  if (name && name.trim()) {
+    try { await updateProfile(cred.user, { displayName: name.trim() }); } catch { /* non-fatal */ }
   }
-  return cred.user.getIdToken();
+  // A failed verification email must not block a successful signup.
+  try { await sendEmailVerification(cred.user); } catch { /* non-fatal */ }
+  // Unverified users must not stay signed in.
+  try { await signOut(auth); } catch { /* non-fatal */ }
 }
 
 /**

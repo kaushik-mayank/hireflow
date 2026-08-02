@@ -9,6 +9,52 @@
 
 ---
 
+## Session 15 — 2026-08-02 — Auth flow redesign (signup/login) + account reset tool
+
+### Symptoms
+1. Signup: "Couldn't create account" shown, **but** the verification email arrived; retrying the same email → "an account with this email already exists".
+2. After verifying, login → "invalid email or password" even though Firebase shows the user created + verified.
+
+### Root cause (one architectural flaw, two faces)
+Both flows **conflated the Firebase step with the backend token-exchange step and masked backend/network failures as credential errors**:
+- **Signup** (`Signup.jsx`): `firebaseSignUp` created the Firebase account + sent the email (success), THEN called `authApi.firebase(...)`. If that backend call failed (CORS / Render cold-start / 502 / transient), the catch showed "Could not create account" — but the Firebase account already existed, so a retry hit Firebase's `email-already-in-use`.
+- **Login** (`Login.jsx`): `signInWithEmailAndPassword` succeeded, but if the subsequent `authApi.firebase` exchange failed, the **outer catch's fallback "Invalid email or password"** masked a server problem as a wrong password. The confusing double-signup also left the Firebase password set to the first attempt, compounding it.
+- Render free-tier cold starts (~50s / 502 on first hit) made the backend exchange fail intermittently, which is what triggered it in the wild.
+
+### Fix — industry-standard redesign (frontend only, no arch/UI change)
+- **Signup now talks ONLY to Firebase.** `firebaseSignUp(name, email, password)` creates the account, sets `displayName` (so the name reaches the backend via the token's `name` claim), sends verification, and signs out. Signup then **always** shows the "verify your email" screen. The app/DB account is created lazily on first verified login. A backend hiccup can no longer report a created account as failed, and there's no retry trap.
+- **Login separates the two steps with honest errors:**
+  - Firebase auth failure → credential message ("That email or password isn't correct.") / mapped Firebase message.
+  - Not verified → the verify message.
+  - **Backend exchange failure → "We're having trouble reaching the server right now. Please try again in a moment."** (or the server's own detail) — never "invalid password".
+- Optional **company** is stashed in localStorage at signup (`pendingCompanyKey`) and sent on the first login exchange, then cleared — so it survives the Firebase-only signup.
+- `firebaseSignIn` keeps the Session-14 `reload()` + `getIdToken(true)` freshness fixes.
+- Backend unchanged: `/auth/firebase` already find-or-creates and reads `name`/`company`.
+
+### Account reset tool (owner runs it — NOT run here)
+`backend/scripts/reset_accounts.py` — dry-run by default; `--confirm` deletes users, `--confirm --all` also deletes jobs/candidates/etc. **Important:** it only clears MongoDB. **Firebase Auth users are separate** — the "email already exists" is Firebase state, so old test users must also be deleted in the Firebase console (Authentication → Users). If `SEED_ON_STARTUP` is true the demo re-seeds on next start.
+
+### Files changed
+- `frontend/src/lib/firebase.js` — `firebaseSignUp` signature + Firebase-only behaviour.
+- `frontend/src/pages/Signup.jsx` — Firebase-only signup; stash company; no backend call.
+- `frontend/src/pages/Login.jsx` — two-step flow with distinct errors; carry/clear company.
+- `frontend/src/constants.js` — `pendingCompanyKey` helper.
+- `backend/scripts/reset_accounts.py` — new maintenance tool.
+
+### ForgotPassword (reviewed, no change)
+Already industry-standard: Firebase `sendPasswordResetEmail`, anti-enumeration (same confirmation for unknown emails), graceful "not configured" state. Left as-is.
+
+### Testing
+- `CI=true yarn build` clean (warnings-as-errors → confirms no unused imports after removing `firebaseSignOut` from Signup); 186 backend tests pass; reset script compiles.
+- ⚠️ Not run end-to-end (no Firebase/live backend here). Owner must redeploy the **frontend** and re-test signup → verify → login. Backend unchanged (no redeploy needed for these fixes).
+
+### Owner action items
+1. Redeploy the frontend (Vercel).
+2. To clear old accounts: run `reset_accounts.py --confirm` AND delete the corresponding users in the Firebase console.
+3. Confirm Render `CORS_ORIGINS` includes the Vercel origin and `REACT_APP_BACKEND_URL` points at Render (these govern whether the login exchange can reach the backend at all).
+
+---
+
 ## Session 14 — 2026-08-02 — Fix: verified users wrongly told "please verify"
 
 ### Symptom
