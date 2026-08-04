@@ -182,6 +182,42 @@ export async function firebaseSignIn(email, password) {
   return { emailVerified: true, idToken };
 }
 
+/**
+ * Sign in and return a fresh ID token WITHOUT enforcing email verification.
+ *
+ * Used by the sign-in flow so the backend can decide what to do with an
+ * unverified account: an admin-approved recruiter is activated without a
+ * verification step (their admin already vouched for the address), while a
+ * public manager sign-up still gets no session until they verify. Keeping that
+ * policy on the server is why this returns the token even when unverified —
+ * unlike firebaseSignIn, which blocks unverified users on the client.
+ *
+ * @returns {Promise<{emailVerified: boolean, idToken: string}>}
+ */
+export async function firebaseSignInRaw(email, password) {
+  const auth = await getAuthInstance();
+  const { signInWithEmailAndPassword } = await import("firebase/auth");
+  const cred = await signInWithEmailAndPassword(auth, email, password);
+  // reload() so a just-verified user's flag isn't stale (see firebaseSignIn).
+  try { await cred.user.reload(); } catch { /* non-fatal */ }
+  const idToken = await cred.user.getIdToken(true);
+  return { emailVerified: cred.user.emailVerified, idToken };
+}
+
+/**
+ * Resend the verification link to the currently signed-in user and sign them
+ * out, so an unverified public sign-up doesn't linger in a Firebase session.
+ * Safe to call when nobody is signed in.
+ */
+export async function firebaseResendAndSignOut() {
+  const auth = await getAuthInstance();
+  const { sendEmailVerification, signOut } = await import("firebase/auth");
+  if (auth.currentUser) {
+    try { await sendEmailVerification(auth.currentUser); } catch { /* non-fatal */ }
+  }
+  try { await signOut(auth); } catch { /* non-fatal */ }
+}
+
 export async function firebaseSendPasswordReset(email) {
   const auth = await getAuthInstance();
   const { sendPasswordResetEmail } = await import("firebase/auth");

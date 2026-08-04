@@ -131,8 +131,10 @@ export default function Signup() {
             <h1 className="mt-5 text-2xl font-semibold text-gray-800">Verify your email</h1>
             <p className="text-gray-600 text-sm mt-2 leading-relaxed">
               We've sent a verification link to <span className="font-medium text-gray-800">{form.email}</span>.
-              Open it to confirm your address, then sign in. You won't be able to access the dashboard until your
-              email is verified.
+              Open it to confirm your address, then sign in.
+            </p>
+            <p className="text-gray-500 text-xs mt-2 leading-relaxed">
+              If your admin already added you to a team, you can sign in now — no verification needed.
             </p>
             <Button onClick={() => navigate("/login")} className="mt-7 w-full">Go to sign in</Button>
             <button

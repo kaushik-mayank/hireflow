@@ -6,7 +6,8 @@ import { useAuth } from "@/context/AuthContext";
 import { Button, Spinner } from "@/components/ui";
 import { pendingCompanyKey } from "@/constants";
 import {
-  isFirebaseConfigured, firebaseSignIn, firebaseErrorMessage, shouldTryLegacyLogin,
+  isFirebaseConfigured, firebaseSignInRaw, firebaseResendAndSignOut,
+  firebaseErrorMessage, shouldTryLegacyLogin,
 } from "@/lib/firebase";
 
 export default function Login() {
@@ -36,10 +37,14 @@ export default function Login() {
         return;
       }
 
-      // Step 1 — authenticate with Firebase. Credential problems are reported here.
+      // Step 1 — authenticate with Firebase. Credential problems are reported
+      // here. We take the token even if the email isn't verified yet, because
+      // the backend decides whether this account needs verification: an
+      // admin-approved recruiter is activated without it, a public manager
+      // sign-up is not (see routes_auth.firebase_exchange).
       let result;
       try {
-        result = await firebaseSignIn(email, password);
+        result = await firebaseSignInRaw(email, password);
       } catch (fbErr) {
         // No Firebase account? Could be a pre-Firebase user (including the demo
         // accounts) — try the old path before telling anyone their details are wrong.
@@ -56,13 +61,8 @@ export default function Login() {
         return;
       }
 
-      if (!result.emailVerified) {
-        setError("Please verify your email to continue. We've sent a new verification link to your inbox — open it, then sign in. If you've just verified, give it a moment and try again.");
-        return;
-      }
-
-      // Step 2 — exchange the verified token for an app session. A failure here
-      // is a server/connection problem, NOT a wrong password, so it must not be
+      // Step 2 — exchange the token for an app session. A failure here is a
+      // server/connection problem, NOT a wrong password, so it must not be
       // reported as a credential error.
       const companyKey = pendingCompanyKey(email);
       let pendingCompany;
@@ -71,7 +71,11 @@ export default function Login() {
       try {
         const res = await authApi.firebase({ id_token: result.idToken, company: pendingCompany });
         if (!res.data.verified || !res.data.token) {
-          setError("Your email verification is still being confirmed. Please wait a moment and try signing in again.");
+          // The backend withheld a session — a public manager sign-up whose email
+          // isn't verified yet. Resend the link and clear the Firebase session,
+          // then tell them what to do. (Approved recruiters never land here.)
+          await firebaseResendAndSignOut();
+          setError("Please verify your email to continue. We've sent a new verification link to your inbox — open it, then sign in.");
           return;
         }
         try { localStorage.removeItem(companyKey); } catch { /* ignore */ }
