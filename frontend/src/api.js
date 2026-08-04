@@ -125,6 +125,8 @@ export const adminApi = {
 // ---- Reports ----
 export const reportsApi = {
   get: () => client.get("/reports"),
+  // Manager-only per-recruiter team report.
+  team: () => client.get("/reports/team"),
 };
 
 // ---- Feedback / Support ----

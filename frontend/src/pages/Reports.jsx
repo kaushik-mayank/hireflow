@@ -12,6 +12,8 @@ import { reportsApi } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, ProgressBar, Skeleton, EmptyState, Pill } from "@/components/ui";
 import { STAGE_COLORS } from "@/constants";
+import { useAuth } from "@/context/AuthContext";
+import TeamReport from "@/components/TeamReport";
 
 const tooltipStyle = {
   borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12,
@@ -153,6 +155,9 @@ function Funnel({ funnel, totalCandidates }) {
 }
 
 export default function Reports() {
+  const { user } = useAuth();
+  const isManager = (user?.org_role || "manager") === "manager";
+  const [view, setView] = useState("overview"); // "overview" | "team" (managers only)
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -163,6 +168,33 @@ export default function Reports() {
       .catch(() => setFailed(true))
       .finally(() => setLoading(false));
   }, []);
+
+  // Managers can switch between their org overview and a per-recruiter team report.
+  const toggle = isManager ? (
+    <div className="flex gap-1 bg-gray-100 rounded-lg p-1 text-sm" data-testid="reports-view-toggle">
+      {[["overview", "Overview"], ["team", "Team"]].map(([k, label]) => (
+        <button
+          key={k}
+          onClick={() => setView(k)}
+          className={`px-3 py-1.5 rounded-md font-medium ${view === k ? "bg-white text-gray-800 shadow-soft" : "text-gray-500"}`}
+          data-testid={`reports-view-${k}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  // The team report loads its own data, so it can render before the personal
+  // overview has (and regardless of whether the manager has their own jobs).
+  if (isManager && view === "team") {
+    return (
+      <Layout>
+        <Topbar title="Reports" subtitle="Team performance" actions={toggle} />
+        <PageBody><TeamReport /></PageBody>
+      </Layout>
+    );
+  }
 
   if (loading) {
     return (
@@ -204,7 +236,7 @@ export default function Reports() {
   if (totals.jobs === 0) {
     return (
       <Layout>
-        <Topbar title="Reports" subtitle="Hiring performance & pipeline analytics" />
+        <Topbar title="Reports" subtitle="Hiring performance & pipeline analytics" actions={toggle} />
         <PageBody>
           <Card>
             <EmptyState
@@ -228,7 +260,7 @@ export default function Reports() {
 
   return (
     <Layout>
-      <Topbar title="Reports" subtitle="Hiring performance & pipeline analytics" />
+      <Topbar title="Reports" subtitle="Hiring performance & pipeline analytics" actions={toggle} />
       <PageBody>
         <HeadlineStats totals={totals} tth={tth} />
         <Insights insights={insights} />

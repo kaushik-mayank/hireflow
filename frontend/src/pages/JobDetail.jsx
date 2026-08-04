@@ -183,6 +183,15 @@ export default function JobDetail() {
     ["activity", "Activity", Activity],
   ];
 
+  // Effective permissions for the caller on this job (managers get all true).
+  // Undefined flags default to allowed so legacy responses never lock anyone out.
+  const perms = job.effective_permissions || {};
+  const can = (flag) => perms[flag] !== false;
+  const canUpload = can("can_upload_candidates");
+  const canUseAI = can("can_use_ai");
+  const canMove = can("can_move_stage");
+  const NO_PERM = "Your admin hasn't given you this permission on this job.";
+
   return (
     <Layout>
       <Topbar
@@ -198,7 +207,13 @@ export default function JobDetail() {
         <Card className="p-5 mb-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-gray-800">Upload Resumes</h3>
-            <AIButton loading={analyzing} onClick={analyzeAll} data-testid="analyze-all-btn">
+            <AIButton
+              loading={analyzing}
+              onClick={analyzeAll}
+              disabled={!canUseAI}
+              title={canUseAI ? undefined : NO_PERM}
+              data-testid="analyze-all-btn"
+            >
               {analyzing ? "Analyzing..." : "Analyze All Candidates"}
             </AIButton>
           </div>
@@ -222,17 +237,31 @@ export default function JobDetail() {
           </div>
 
           <div
-            className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${dragOver ? "border-indigo bg-indigo-light/40" : "border-gray-200 hover:border-indigo/50"}`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+              !canUpload
+                ? "border-gray-200 bg-gray-50 opacity-70 cursor-not-allowed"
+                : `cursor-pointer ${dragOver ? "border-indigo bg-indigo-light/40" : "border-gray-200 hover:border-indigo/50"}`
+            }`}
+            onDragOver={(e) => { e.preventDefault(); if (canUpload) setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
-            onClick={() => fileRef.current?.click()}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); if (canUpload) handleFiles(e.dataTransfer.files); }}
+            onClick={() => canUpload && fileRef.current?.click()}
+            title={canUpload ? undefined : NO_PERM}
             data-testid="upload-zone"
           >
-            <input ref={fileRef} type="file" accept={ACCEPT_ATTR} multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} data-testid="upload-input" />
+            <input ref={fileRef} type="file" accept={ACCEPT_ATTR} multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} disabled={!canUpload} data-testid="upload-input" />
             {uploading ? <Spinner size={22} className="mx-auto text-indigo" /> : <Upload size={22} className="mx-auto text-gray-400" />}
-            <p className="text-sm text-gray-700 mt-2 font-medium">{uploading ? "Uploading..." : "Drop resumes here or click to browse"}</p>
-            <p className="text-xs text-gray-400 mt-1">PDF, Word, images or text · multiple · max 5MB each</p>
+            {canUpload ? (
+              <>
+                <p className="text-sm text-gray-700 mt-2 font-medium">{uploading ? "Uploading..." : "Drop resumes here or click to browse"}</p>
+                <p className="text-xs text-gray-400 mt-1">PDF, Word, images or text · multiple · max 5MB each</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-700 mt-2 font-medium">Adding candidates isn't enabled for you</p>
+                <p className="text-xs text-gray-400 mt-1">Ask your admin to give you upload access on this job.</p>
+              </>
+            )}
           </div>
         </Card>
 
@@ -274,8 +303,15 @@ export default function JobDetail() {
               <div className="flex items-center gap-3 mb-3 bg-indigo-light/50 rounded-lg px-4 py-2.5" data-testid="bulk-bar">
                 <CheckSquare size={16} className="text-indigo" />
                 <span className="text-sm text-gray-700 font-medium">{selected.length} selected</span>
-                <select onChange={(e) => e.target.value && bulkMove(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm bg-white ml-auto" defaultValue="" data-testid="bulk-stage-select">
-                  <option value="" disabled>Move to stage...</option>
+                <select
+                  onChange={(e) => e.target.value && bulkMove(e.target.value)}
+                  disabled={!canMove}
+                  title={canMove ? undefined : NO_PERM}
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm bg-white ml-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                  defaultValue=""
+                  data-testid="bulk-stage-select"
+                >
+                  <option value="" disabled>{canMove ? "Move to stage..." : "Moving not enabled"}</option>
                   {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <button onClick={() => setSelected([])} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>

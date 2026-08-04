@@ -4,8 +4,34 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Session 26: fixed recruiter first-login (email-first / create-password) + onboarding-status API. ⚠️ Frontend (Sessions 22/24/26) needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Session 27: permission-gated job controls (Phase 13) + manager team-report view (Phase 14 fe). ⚠️ Frontend (Sessions 22/24/26/27) needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-05
+
+---
+
+## Session 27 — 2026-08-05 — Cycle 2 frontend: permission-gated controls + team-report view
+
+Continuing "finish the pending frontend" (owner confirmed the deployed app builds). Two pieces, both frontend-only (no backend change; 289 offline backend tests unchanged).
+
+### Phase 13 — permission-aware controls on the job page (`pages/JobDetail.jsx`)
+Drives off `job.effective_permissions` (already returned by `GET /jobs/{id}`; managers get all-true, undefined defaults to allowed so legacy responses never lock anyone out). A recruiter now sees a control **disabled with a reason** instead of clicking and getting a 403:
+- **Upload zone** — disabled + "Adding candidates isn't enabled for you / Ask your admin" when `!can_upload_candidates`.
+- **Analyze All (AI)** — disabled with tooltip when `!can_use_ai`.
+- **Bulk move stage** — disabled with tooltip when `!can_move_stage`.
+Backend enforcement is unchanged and remains the real gate; this is UX, not security.
+
+### Phase 14 frontend — manager team report (`components/TeamReport.jsx` + `pages/Reports.jsx`)
+- **`TeamReport.jsx`** (NEW): consumes `GET /reports/team` and renders **insights**, **team throughput** table (sourced/shortlisted/interviewed/hired + rates, "—" below the 5-sample floor), **target attainment** (ProgressBar per set target with met/on_track/at_risk/missed pill), **deadline health** (overdue-first, red overdue pills), and **workload balance**. Own loading / failed ("server problem, not you") / empty ("no teammates yet") states.
+- **`Reports.jsx`**: managers get an **Overview | Team** toggle in the Topbar (recruiters never see it); the Team view short-circuits before the personal-overview early-returns, so it works even if the manager has no jobs of their own. `reportsApi.team()` added.
+
+### What was NOT verified (honesty)
+- **No `CI=true yarn build`** here (no Node) — static checks only (no unused imports / dangling refs in the edited files; confirmed each new symbol is referenced).
+- TeamReport uses tables + ProgressBar rather than recharts for the first cut (lower risk, same tokens) — a charted version can follow if wanted.
+- Per-candidate AI/stage controls on **CandidateDetail/Board** are not yet permission-gated (only the job-page controls are) — follow-on.
+
+### Owner action items
+1. **Run `CI=true yarn build`** (covers Sessions 22/24/26/27) and paste any errors.
+2. QA: a recruiter lacking a permission sees the control disabled with a tooltip (not a 403); a manager opens **Reports → Team** and sees per-recruiter throughput/targets/deadlines/workload.
 
 ---
 
