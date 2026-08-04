@@ -4,8 +4,40 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 8 (re-audit, read-only) complete → awaiting go-ahead for Phase 9.** Live: frontend `https://hireflow.cortinix.com` (Vercel), backend `https://hireflow-w04l.onrender.com` (Render).
+**Current phase:** 🔵 **Cycle 2 — Phase 9a (data foundation) complete → Phase 9b (apply org-scoping across all queries) is next, awaiting "continue".** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-04
+
+---
+
+## Session 18 — 2026-08-04 — Cycle 2 Phase 9a: org data model, permissions, migration, seed
+
+**Decisions confirmed by owner:** skip JWT changes (C1); standardize cross-org on **404** (C2); **jobs are assignment-only, manager-created — personal jobs deferred to Cycle 3** (removes the "own + assigned" union complexity).
+
+**Goal:** additive org foundation with no change to existing route scoping yet. (Phase 9 is split 9a/9b as flagged in CYCLE2_AUDIT.md §7; this is 9a.)
+
+### What was built
+- **`database.py`** — new collections (`organizations`, `invitations`, `job_assignments`, `job_jd_overrides`, `activity_events`) + all §3.3 indexes, including the partial-unique index for one *pending* invite per `(org, email)`. All additive; `create_index` is idempotent.
+- **`permissions.py`** (NEW — the enforcement spine): `require_org_member`, `require_manager`, `resolve_job_access` (manager → any org job full perms; recruiter → only via an active assignment; cross-org/no-access → **404**), `require_permission` (403 + human message, never a flag name), `resolve_jd` (personal override for the assigned recruiter, org JD for everyone else incl. manager). `DEFAULT_PERMISSIONS`/`MANAGER_PERMISSIONS`.
+- **`routes_auth.py`** — `firebase_exchange` and the legacy signup/login now **create an org on first manager login** (compensating delete on partial failure; never half-creates); org-less accounts **self-heal** into manager+org on next login; `_public_user` exposes `org_id`/`org_role`/`status` (no JWT change — `get_current_user` reads the live doc). Login/exchange also reject `status="disabled"`.
+- **`scripts/migrate_orgs.py`** (NEW) — idempotent, dry-run-by-default migration: each existing user → own org (manager), backfills `org_id` on their jobs/candidates/transitions/feedback; `--rollback` undoes it. Modelled on `reset_accounts.py`.
+- **`seed.py`** (rewritten) — one demo org **Meridian Group** (manager Sarah + recruiters **Nadia**, **Tom**) with the 3 occupation-diverse jobs assigned across the recruiters (targets/deadlines/permissions; Tom has `can_edit_jd` to demo overrides), candidates stamped `sourced_by`, plus `activity_events`. Alex Admin keeps their own org (HireFlow Inc) + platform-admin allowlist.
+
+### Tests
+- **`tests/test_permissions.py`** (14 new): manager full access, cross-org 404, missing/no-org 404, recruiter assigned/unassigned/revoked, permission-merge, 403 human message, personal-JD resolution.
+- **200 tests pass forwards AND in reverse** (186 baseline + 14). No isolation regression.
+- Backend files `py_compile` clean.
+
+### What was NOT verified (honesty)
+- **Nothing executed against a real DB.** The migration and org-creation-on-login logic are unit-reasoned/stub-tested only. `migrate_orgs.py` and the new `seed.py` have **not** been run against Mongo — **must be dry-run against a copy before production** (runbook item, Phase 15). The partial-unique invitation index and the compensating-delete path are unexercised live.
+- No frontend change in 9a → no rebuild run (frontend still branches only on platform `role`; org UI lands in Phases 11/13). The `org_role` field is now available on the user object for that.
+- Existing routes still scope by `user_id` — **9b** replaces that with org+assignment scoping (the actual isolation work). Until 9b, no cross-org enforcement is active on jobs/candidates/AI/reports.
+
+### Owner action items
+- None yet. `APP_URL` env var arrives in Phase 10. Migration command + deploy order will be in the Phase 15 runbook; **do not run `migrate_orgs.py` in production until the full cycle is deployed** (it's forward-compatible but pair it with the code that uses org fields).
+
+### Backlog / Not in scope (logged)
+- `users.is_active` (int) vs `status` (string) still coexist (C3) — gated on both; unify in a later cleanup.
+- `stage_transitions.moved_by` historical rows are names only (no `actor_id`) — per-recruiter attribution of pre-Cycle-2 history is limited.
 
 ---
 
