@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 
-from database import jobs, candidates, stage_transitions, UPLOAD_DIR
+from database import jobs, candidates, stage_transitions, activity_events, UPLOAD_DIR
 from auth import get_current_user
 from models import StageUpdate, NoteUpdate, BulkStageUpdate
 import resume_parser
+import permissions
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -55,15 +56,14 @@ async def upload_resumes(
     source: str = Form(...),
     user: dict = Depends(get_current_user),
 ):
-    job = await jobs.find_one({"id": job_id, "user_id": user["id"]}, {"_id": 0})
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    access = await permissions.resolve_job_access(user, job_id)
 
     # Source is mandatory (the UI enforces it too); reject a blank value.
     clean_source = (source or "").strip()
     if not clean_source:
         raise HTTPException(status_code=400, detail="A candidate source is required")
 
+    assignment_id = access.assignment["id"] if access.assignment else None
     created = []
     for f in files:
         ext = os.path.splitext(f.filename or "")[1].lower()
@@ -85,9 +85,13 @@ async def upload_resumes(
             out.write(content)
 
         now = datetime.now(timezone.utc).isoformat()
+        cand_id = str(uuid.uuid4())
         cand = {
-            "id": str(uuid.uuid4()),
+            "id": cand_id,
             "job_id": job_id,
+            "org_id": access.org_id,
+            "sourced_by": user["id"],
+            "assignment_id": assignment_id,
             "name": guess_name(text, f.filename),
             "email": parsed["email"],
             "phone": parsed["phone"],
@@ -112,32 +116,27 @@ async def upload_resumes(
         }
         await candidates.insert_one(cand)
         cand.pop("_id", None)
+        await activity_events.insert_one({
+            "id": str(uuid.uuid4()), "org_id": access.org_id, "actor_id": user["id"],
+            "job_id": job_id, "candidate_id": cand_id, "type": "candidate_uploaded",
+            "meta": {"source": clean_source}, "created_at": now,
+        })
         created.append(cand)
     return {"created": created, "count": len(created)}
 
 
 @router.get("/job/{job_id}")
 async def list_candidates(job_id: str, user: dict = Depends(get_current_user)):
-    job = await jobs.find_one({"id": job_id, "user_id": user["id"]})
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    docs = await candidates.find({"job_id": job_id}, {"_id": 0}).to_list(5000)
+    access = await permissions.resolve_job_access(user, job_id)
+    query = {"job_id": job_id, **permissions.candidate_scope_filter(access, user)}
+    docs = await candidates.find(query, {"_id": 0}).to_list(5000)
     return docs
-
-
-async def _owns_candidate(candidate_id: str, user: dict):
-    cand = await candidates.find_one({"id": candidate_id}, {"_id": 0})
-    if not cand:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-    job = await jobs.find_one({"id": cand["job_id"], "user_id": user["id"]})
-    if not job:
-        raise HTTPException(status_code=403, detail="Not authorized for this candidate")
-    return cand, job
 
 
 @router.get("/{candidate_id}")
 async def get_candidate(candidate_id: str, user: dict = Depends(get_current_user)):
-    cand, job = await _owns_candidate(candidate_id, user)
+    cand, access = await permissions.resolve_candidate_access(user, candidate_id)
+    job = access.job
     transitions = await stage_transitions.find(
         {"candidate_id": candidate_id}, {"_id": 0}
     ).sort("moved_at", -1).to_list(500)
@@ -149,15 +148,23 @@ async def get_candidate(candidate_id: str, user: dict = Depends(get_current_user
 async def _move_stage(cand: dict, to_stage: str, note: str, user: dict):
     from_stage = cand.get("stage")
     now = datetime.now(timezone.utc).isoformat()
+    org_id = cand.get("org_id")
     await candidates.update_one({"id": cand["id"]}, {"$set": {"stage": to_stage}})
     await stage_transitions.insert_one({
         "id": str(uuid.uuid4()),
         "candidate_id": cand["id"],
+        "org_id": org_id,
+        "actor_id": user["id"],
         "from_stage": from_stage,
         "to_stage": to_stage,
         "note": note,
         "moved_by": user["name"],
         "moved_at": now,
+    })
+    await activity_events.insert_one({
+        "id": str(uuid.uuid4()), "org_id": org_id, "actor_id": user["id"],
+        "job_id": cand.get("job_id"), "candidate_id": cand["id"], "type": "stage_changed",
+        "meta": {"from_stage": from_stage, "to_stage": to_stage}, "created_at": now,
     })
 
 
@@ -165,9 +172,10 @@ async def _move_stage(cand: dict, to_stage: str, note: str, user: dict):
 async def update_stage(candidate_id: str, body: StageUpdate, user: dict = Depends(get_current_user)):
     if body.stage not in STAGES:
         raise HTTPException(status_code=400, detail="Invalid stage")
-    cand, job = await _owns_candidate(candidate_id, user)
+    cand, access = await permissions.resolve_candidate_access(user, candidate_id)
     await _move_stage(cand, body.stage, body.note, user)
 
+    job = access.job
     quota_met = False
     if body.stage == HIRED_STAGE:
         hired = await candidates.count_documents({"job_id": job["id"], "stage": HIRED_STAGE})
@@ -188,20 +196,32 @@ async def bulk_update_stage(body: BulkStageUpdate, user: dict = Depends(get_curr
     if not body.candidate_ids:
         return {"success": True, "updated": 0}
 
+    # Org-scope first, then resolve access once per job (cached) and apply the
+    # recruiter's candidate visibility — so a bulk move can never reach another
+    # org's or another recruiter's candidates.
     cands = await candidates.find(
-        {"id": {"$in": body.candidate_ids}}, {"_id": 0}
+        {"id": {"$in": body.candidate_ids}, "org_id": user.get("org_id")}, {"_id": 0}
     ).to_list(len(body.candidate_ids))
     if not cands:
         return {"success": True, "updated": 0}
 
-    # One ownership check for all the jobs involved, rather than per candidate.
-    owned_job_ids = {
-        j["id"] for j in await jobs.find(
-            {"id": {"$in": list({c["job_id"] for c in cands})}, "user_id": user["id"]},
-            {"_id": 0, "id": 1},
-        ).to_list(1000)
-    }
-    movable = [c for c in cands if c.get("job_id") in owned_job_ids]
+    access_by_job: dict = {}
+    movable = []
+    for c in cands:
+        job_id = c.get("job_id")
+        if job_id not in access_by_job:
+            try:
+                access_by_job[job_id] = await permissions.resolve_job_access(user, job_id)
+            except HTTPException:
+                access_by_job[job_id] = None
+        access = access_by_job[job_id]
+        if access is None:
+            continue
+        if (access.scope == "assigned"
+                and not access.can("can_view_team_candidates")
+                and c.get("sourced_by") != user["id"]):
+            continue
+        movable.append(c)
     if not movable:
         return {"success": True, "updated": 0}
 
@@ -213,6 +233,8 @@ async def bulk_update_stage(body: BulkStageUpdate, user: dict = Depends(get_curr
         {
             "id": str(uuid.uuid4()),
             "candidate_id": c["id"],
+            "org_id": c.get("org_id"),
+            "actor_id": user["id"],
             "from_stage": c.get("stage"),
             "to_stage": body.stage,
             "note": body.note,
@@ -221,12 +243,20 @@ async def bulk_update_stage(body: BulkStageUpdate, user: dict = Depends(get_curr
         }
         for c in movable
     ])
+    await activity_events.insert_many([
+        {
+            "id": str(uuid.uuid4()), "org_id": c.get("org_id"), "actor_id": user["id"],
+            "job_id": c.get("job_id"), "candidate_id": c["id"], "type": "stage_changed",
+            "meta": {"from_stage": c.get("stage"), "to_stage": body.stage}, "created_at": now,
+        }
+        for c in movable
+    ])
     return {"success": True, "updated": len(movable)}
 
 
 @router.post("/{candidate_id}/note")
 async def add_note(candidate_id: str, body: NoteUpdate, user: dict = Depends(get_current_user)):
-    cand, _ = await _owns_candidate(candidate_id, user)
+    cand, _ = await permissions.resolve_candidate_access(user, candidate_id)
     note = {
         "id": str(uuid.uuid4()),
         "text": body.note,
@@ -243,7 +273,10 @@ async def add_note(candidate_id: str, body: NoteUpdate, user: dict = Depends(get
 
 @router.delete("/{candidate_id}")
 async def delete_candidate(candidate_id: str, user: dict = Depends(get_current_user)):
-    cand, _ = await _owns_candidate(candidate_id, user)
+    cand, access = await permissions.resolve_candidate_access(user, candidate_id)
+    # A recruiter may remove a candidate they sourced; a manager may remove any.
+    if access.scope != "manager" and cand.get("sourced_by") != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only remove candidates you added.")
     if cand.get("pdf_path"):
         try:
             os.remove(UPLOAD_DIR / cand["pdf_path"])

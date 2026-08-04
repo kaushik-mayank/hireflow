@@ -2,9 +2,10 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
-from database import jobs, candidates, stage_transitions
+from database import jobs, candidates, stage_transitions, job_assignments, job_jd_overrides
 from auth import get_current_user
 from models import JobCreate, JobUpdate
+import permissions
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -43,20 +44,27 @@ async def _job_stats(job: dict) -> dict:
 
 
 @router.get("")
-async def list_jobs(user: dict = Depends(get_current_user)):
-    """List postings with candidate counts.
+async def list_jobs(user: dict = Depends(permissions.require_org_member)):
+    """List postings with candidate counts, scoped to the caller.
 
-    This used to issue one candidates query per job inside a loop — a recruiter
-    with 30 postings triggered 31 round-trips on every page load. Now two
-    queries regardless of how many postings exist.
+    Manager → every job in the org. Recruiter → only jobs they have an active
+    assignment on (Cycle 2 is assignment-only; personal jobs are Cycle 3).
     """
-    docs = await jobs.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    org_id = user["org_id"]
+    accessible = await permissions.accessible_job_ids(user)  # None = manager (all)
+    query = {"org_id": org_id}
+    if accessible is not None:
+        if not accessible:
+            return []
+        query["id"] = {"$in": accessible}
+    docs = await jobs.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     counts = await _counts_for_jobs([d["id"] for d in docs])
     return [_apply_counts(d, counts) for d in docs]
 
 
 @router.post("")
-async def create_job(body: JobCreate, user: dict = Depends(get_current_user)):
+async def create_job(body: JobCreate, user: dict = Depends(permissions.require_manager)):
+    """Only a manager ("Admin") creates jobs in Cycle 2."""
     if not body.title or not body.title.strip():
         raise HTTPException(status_code=400, detail="Job title is required")
     if body.openings_needed < 1:
@@ -65,7 +73,10 @@ async def create_job(body: JobCreate, user: dict = Depends(get_current_user)):
     now = datetime.now(timezone.utc).isoformat()
     job = {
         "id": str(uuid.uuid4()),
-        "user_id": user["id"],
+        "org_id": user["org_id"],
+        "created_by": user["id"],
+        "origin": "org",
+        "user_id": user["id"],  # retained for backward compatibility with old reads
         "title": body.title.strip(),
         "department": body.department,
         "openings_needed": body.openings_needed,
@@ -83,9 +94,15 @@ async def create_job(body: JobCreate, user: dict = Depends(get_current_user)):
 
 @router.get("/{job_id}")
 async def get_job(job_id: str, user: dict = Depends(get_current_user)):
-    job = await jobs.find_one({"id": job_id, "user_id": user["id"]}, {"_id": 0})
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    access = await permissions.resolve_job_access(user, job_id)
+    job = dict(access.job)
+    # The JD the caller should see (their personal override if any, else the org JD).
+    jd = await permissions.resolve_jd(access, user["id"])
+    job["jd_text"] = jd["jd_text"]
+    job["jd_enhanced"] = jd["jd_enhanced"]
+    job["jd_source"] = jd["jd_source"]
+    job["effective_permissions"] = access.permissions
+    job["access_scope"] = access.scope
     return await _job_stats(job)
 
 
@@ -94,9 +111,12 @@ VALID_STATUSES = ("active", "paused", "closed")
 
 @router.put("/{job_id}")
 async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_current_user)):
-    job = await jobs.find_one({"id": job_id, "user_id": user["id"]}, {"_id": 0})
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    access = await permissions.resolve_job_access(user, job_id)
+    # Recruiter editing (meta + personal JD override) lands in Phase 12; for now
+    # only the manager edits the org job.
+    if access.scope != "manager":
+        raise HTTPException(status_code=403, detail="Only an admin can edit this job.")
+    job = access.job
 
     # `exclude_unset` rather than dropping falsy values: the old filter meant a
     # field could never be cleared back to empty, because "" and None both
@@ -117,22 +137,23 @@ async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_curr
 
 @router.delete("/{job_id}")
 async def delete_job(job_id: str, user: dict = Depends(get_current_user)):
-    job = await jobs.find_one({"id": job_id, "user_id": user["id"]})
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    access = await permissions.resolve_job_access(user, job_id)
+    if access.scope != "manager":
+        raise HTTPException(status_code=403, detail="Only an admin can delete this job.")
     cand_ids = [c["id"] async for c in candidates.find({"job_id": job_id}, {"id": 1})]
     if cand_ids:
         await stage_transitions.delete_many({"candidate_id": {"$in": cand_ids}})
     await candidates.delete_many({"job_id": job_id})
+    # Clean up assignment/override rows so nothing is orphaned.
+    await job_assignments.delete_many({"job_id": job_id})
+    await job_jd_overrides.delete_many({"job_id": job_id})
     await jobs.delete_one({"id": job_id})
     return {"success": True}
 
 
 @router.get("/{job_id}/activity")
 async def job_activity(job_id: str, user: dict = Depends(get_current_user)):
-    job = await jobs.find_one({"id": job_id, "user_id": user["id"]})
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    await permissions.resolve_job_access(user, job_id)
     cand_ids = [c["id"] async for c in candidates.find({"job_id": job_id}, {"id": 1})]
     transitions = await stage_transitions.find(
         {"candidate_id": {"$in": cand_ids}}, {"_id": 0}

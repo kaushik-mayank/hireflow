@@ -8,6 +8,7 @@ from models import (
     EmailRequest, CompareRequest, SummaryRequest, StructureRequest,
 )
 import ai_service as ai
+import permissions
 
 
 def _as_list(value) -> list:
@@ -97,7 +98,7 @@ def _as_score(value) -> int:
         return 0
 
 
-def _build_rank_set_doc(result: dict, current_stage: str, now: str) -> dict:
+def _build_rank_set_doc(result: dict, current_stage: str, now: str, jd_source: str) -> dict:
     summary = result.get("summary")
     set_doc = {
         "ai_score": _as_score(result.get("score")),
@@ -106,13 +107,16 @@ def _build_rank_set_doc(result: dict, current_stage: str, now: str) -> dict:
         "missing_skills": _as_str_list(result.get("missing_skills")),
         "red_flags": _as_str_list(result.get("red_flags")),
         "analyzed_at": now,
+        # Which JD text produced this analysis, so results stay explainable when a
+        # recruiter uses a personal JD override (§5.3).
+        "analyzed_jd_source": jd_source,
     }
     if current_stage == "Applied":
         set_doc["stage"] = "AI Ranked"
     return set_doc
 
 
-async def _rank_batch(jd_text: str, batch: list) -> list:
+async def _rank_batch(jd_text: str, batch: list, jd_source: str) -> list:
     """Run AI ranking on one batch and persist results. Returns updated candidates."""
     raw = await ai.call_ai(ai.RANK_SYSTEM, ai.build_rank_prompt(jd_text, batch))
     parsed = ai.parse_ai_json(raw)
@@ -125,7 +129,7 @@ async def _rank_batch(jd_text: str, batch: list) -> list:
         result = result_map.get(c["id"])
         if not result:
             continue
-        set_doc = _build_rank_set_doc(result, c.get("stage"), now)
+        set_doc = _build_rank_set_doc(result, c.get("stage"), now, jd_source)
         await candidates.update_one({"id": c["id"]}, {"$set": set_doc})
         c.update(set_doc)
         updated.append(c)
@@ -134,13 +138,15 @@ async def _rank_batch(jd_text: str, batch: list) -> list:
 
 @router.post("/rank")
 async def rank_candidates(body: RankRequest, user: dict = Depends(get_current_user)):
-    job = await jobs.find_one({"id": body.job_id, "user_id": user["id"]}, {"_id": 0})
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not job.get("jd_text"):
+    access = await permissions.resolve_job_access(user, body.job_id)
+    permissions.require_permission(access, "can_use_ai")
+    jd = await permissions.resolve_jd(access, user["id"])
+    if not jd["jd_text"]:
         raise HTTPException(status_code=400, detail="Add a job description before analyzing candidates")
 
-    query = {"job_id": body.job_id}
+    # Only rank candidates the caller can see (own sourced unless manager /
+    # can_view_team_candidates).
+    query = {"job_id": body.job_id, **permissions.candidate_scope_filter(access, user)}
     if not body.reanalyze:
         query["analyzed_at"] = None
     cands = await candidates.find(query, {"_id": 0}).to_list(5000)
@@ -149,45 +155,47 @@ async def rank_candidates(body: RankRequest, user: dict = Depends(get_current_us
 
     updated = []
     for batch in _chunk(cands, 10):
-        updated.extend(await _rank_batch(job["jd_text"], batch))
+        updated.extend(await _rank_batch(jd["jd_text"], batch, jd["jd_source"]))
 
-    await ai.log_usage("rank", user_id=user["id"], job_id=body.job_id)
+    await ai.log_usage("rank", user_id=user["id"], job_id=body.job_id, org_id=access.org_id)
     return {"updated": updated, "count": len(updated)}
 
 
 @router.post("/enhance-jd")
-async def enhance_jd(body: EnhanceJDRequest, user: dict = Depends(get_current_user)):
+async def enhance_jd(body: EnhanceJDRequest, user: dict = Depends(permissions.require_org_member)):
     if not body.jd_text or not body.jd_text.strip():
         raise HTTPException(status_code=400, detail="Provide a job description to enhance")
     enhanced = await ai.call_ai(ai.ENHANCE_SYSTEM, ai.build_enhance_prompt(body.jd_text, body.title))
-    await ai.log_usage("enhance-jd", user_id=user["id"])
+    await ai.log_usage("enhance-jd", user_id=user["id"], org_id=user.get("org_id"))
     return {"original": body.jd_text, "enhanced": enhanced.strip()}
 
 
 async def _get_owned_candidate(candidate_id: str, user: dict):
-    cand = await candidates.find_one({"id": candidate_id}, {"_id": 0})
-    if not cand:
-        raise HTTPException(status_code=404, detail="Candidate not found")
-    job = await jobs.find_one({"id": cand["job_id"], "user_id": user["id"]}, {"_id": 0})
-    if not job:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    return cand, job
+    """Resolve a candidate the caller may act on (org + assignment + visibility),
+    plus the JD text/source their AI runs should use. Every caller is an AI tool,
+    so the can_use_ai permission is enforced here once."""
+    cand, access = await permissions.resolve_candidate_access(user, candidate_id)
+    permissions.require_permission(access, "can_use_ai")
+    jd = await permissions.resolve_jd(access, user["id"])
+    return cand, access, jd
 
 
 @router.post("/questions")
 async def screening_questions(body: QuestionsRequest, user: dict = Depends(get_current_user)):
-    cand, job = await _get_owned_candidate(body.candidate_id, user)
-    raw = await ai.call_ai(ai.QUESTIONS_SYSTEM, ai.build_questions_prompt(job.get("jd_text", ""), cand))
+    cand, access, jd = await _get_owned_candidate(body.candidate_id, user)
+    raw = await ai.call_ai(ai.QUESTIONS_SYSTEM, ai.build_questions_prompt(jd["jd_text"], cand))
     parsed = ai.parse_ai_json(raw)
     if not isinstance(parsed, list):
         parsed = []
-    await ai.log_usage("questions", user_id=user["id"], job_id=job["id"], candidate_id=cand["id"])
+    await ai.log_usage("questions", user_id=user["id"], job_id=access.job["id"],
+                       candidate_id=cand["id"], org_id=access.org_id)
     return {"questions": parsed}
 
 
 @router.post("/email")
 async def draft_email(body: EmailRequest, user: dict = Depends(get_current_user)):
-    cand, job = await _get_owned_candidate(body.candidate_id, user)
+    cand, access, jd = await _get_owned_candidate(body.candidate_id, user)
+    job = access.job
     company = user.get("company") or ""
     sender_name = user.get("name") or ""
     raw = await ai.call_ai(
@@ -197,7 +205,7 @@ async def draft_email(body: EmailRequest, user: dict = Depends(get_current_user)
         # and organisation are passed so the signature is real, not a placeholder.
         ai.build_email_prompt(
             body.email_type, cand, job["title"], company,
-            job.get("jd_text", ""), sender_name,
+            jd["jd_text"], sender_name,
         ),
     )
     # Plain-text parse (emails are no longer JSON — see parse_email_output).
@@ -206,18 +214,20 @@ async def draft_email(body: EmailRequest, user: dict = Depends(get_current_user)
     # editable fields before the recruiter sends or copies the draft.
     parsed["sender_name"] = sender_name
     parsed["organization"] = company
-    await ai.log_usage("email", user_id=user["id"], job_id=job["id"], candidate_id=cand["id"])
+    await ai.log_usage("email", user_id=user["id"], job_id=job["id"],
+                       candidate_id=cand["id"], org_id=access.org_id)
     return parsed
 
 
 @router.post("/summary")
 async def deep_summary(body: SummaryRequest, user: dict = Depends(get_current_user)):
-    cand, job = await _get_owned_candidate(body.candidate_id, user)
-    raw = await ai.call_ai(ai.SUMMARY_SYSTEM, ai.build_summary_prompt(job.get("jd_text", ""), cand))
+    cand, access, jd = await _get_owned_candidate(body.candidate_id, user)
+    raw = await ai.call_ai(ai.SUMMARY_SYSTEM, ai.build_summary_prompt(jd["jd_text"], cand))
     parsed = ai.parse_ai_json(raw)
     if not isinstance(parsed, dict):
         parsed = {"overall_fit": raw, "strengths": [], "concerns": [], "experience_highlights": [], "recommendation": "Maybe"}
-    await ai.log_usage("summary", user_id=user["id"], job_id=job["id"], candidate_id=cand["id"])
+    await ai.log_usage("summary", user_id=user["id"], job_id=access.job["id"],
+                       candidate_id=cand["id"], org_id=access.org_id)
     return parsed
 
 
@@ -229,7 +239,7 @@ async def structure_resume(body: StructureRequest, user: dict = Depends(get_curr
     is only ever parsed the first time someone views it — the cost-efficient
     path. Pass refresh=true to regenerate.
     """
-    cand, job = await _get_owned_candidate(body.candidate_id, user)
+    cand, access, _jd = await _get_owned_candidate(body.candidate_id, user)
 
     if cand.get("resume_structured") and not body.refresh:
         return {"structured": cand["resume_structured"], "cached": True}
@@ -237,29 +247,45 @@ async def structure_resume(body: StructureRequest, user: dict = Depends(get_curr
     raw = await ai.call_ai(ai.STRUCTURE_SYSTEM, ai.build_structure_prompt(cand.get("resume_text", "")))
     structured = _normalize_structure(ai.parse_ai_json(raw), cand)
     await candidates.update_one({"id": cand["id"]}, {"$set": {"resume_structured": structured}})
-    await ai.log_usage("structure", user_id=user["id"], job_id=job["id"], candidate_id=cand["id"])
+    await ai.log_usage("structure", user_id=user["id"], job_id=access.job["id"],
+                       candidate_id=cand["id"], org_id=access.org_id)
     return {"structured": structured, "cached": False}
 
 
 @router.post("/compare")
 async def compare_candidates(body: CompareRequest, user: dict = Depends(get_current_user)):
-    cand_a, job = await _get_owned_candidate(body.candidate_id_a, user)
-    cand_b, _ = await _get_owned_candidate(body.candidate_id_b, user)
-    raw = await ai.call_ai(ai.COMPARE_SYSTEM, ai.build_compare_prompt(job.get("jd_text", ""), cand_a, cand_b))
+    cand_a, access_a, jd = await _get_owned_candidate(body.candidate_id_a, user)
+    cand_b, access_b, _ = await _get_owned_candidate(body.candidate_id_b, user)
+    # Both candidates must belong to the same job — comparing across jobs is meaningless.
+    if cand_a.get("job_id") != cand_b.get("job_id"):
+        raise HTTPException(status_code=400, detail="Candidates must be on the same job to compare.")
+    raw = await ai.call_ai(ai.COMPARE_SYSTEM, ai.build_compare_prompt(jd["jd_text"], cand_a, cand_b))
     parsed = ai.parse_ai_json(raw)
     if not isinstance(parsed, dict):
         parsed = {"recommendation": "", "reasoning": raw, "candidate_a_strengths": [], "candidate_b_strengths": []}
     parsed["candidate_a_name"] = cand_a.get("name")
     parsed["candidate_b_name"] = cand_b.get("name")
-    await ai.log_usage("compare", user_id=user["id"], job_id=job["id"])
+    await ai.log_usage("compare", user_id=user["id"], job_id=access_a.job["id"], org_id=access_a.org_id)
     return parsed
 
 
 @router.post("/pipeline-health")
-async def pipeline_health(user: dict = Depends(get_current_user)):
-    user_jobs = await jobs.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+async def pipeline_health(user: dict = Depends(permissions.require_org_member)):
+    # Org-scoped: manager sees the whole org's pipeline; recruiter sees their
+    # assigned jobs' pipeline.
+    accessible = await permissions.accessible_job_ids(user)
+    job_query = {"org_id": user["org_id"]}
+    if accessible is not None:
+        if not accessible:
+            user_jobs = []
+        job_query["id"] = {"$in": accessible}
+    user_jobs = await jobs.find(job_query, {"_id": 0}).to_list(1000)
     job_ids = [j["id"] for j in user_jobs]
-    all_cands = await candidates.find({"job_id": {"$in": job_ids}}, {"_id": 0}).to_list(10000)
+    cand_query = {"job_id": {"$in": job_ids}}
+    if accessible is not None:
+        # Recruiter without team visibility sees only their sourced candidates.
+        cand_query["sourced_by"] = user["id"]
+    all_cands = await candidates.find(cand_query, {"_id": 0}).to_list(10000)
 
     stage_counts = {}
     for c in all_cands:
@@ -276,5 +302,5 @@ async def pipeline_health(user: dict = Depends(get_current_user)):
         "unanalyzed": len([c for c in all_cands if not c.get("analyzed_at")]),
     }
     report = await ai.call_ai(ai.HEALTH_SYSTEM, ai.build_health_prompt(stats))
-    await ai.log_usage("pipeline-health", user_id=user["id"])
+    await ai.log_usage("pipeline-health", user_id=user["id"], org_id=user["org_id"])
     return {"report": report.strip(), "stats": stats}

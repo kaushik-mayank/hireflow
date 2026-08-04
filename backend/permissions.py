@@ -22,7 +22,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException
 
 from auth import get_current_user
-from database import jobs, job_assignments, job_jd_overrides
+from database import jobs, job_assignments, job_jd_overrides, candidates
 
 MANAGER = "manager"
 RECRUITER = "recruiter"
@@ -128,6 +128,47 @@ def require_permission(access: JobAccess, flag: str) -> None:
     """Raise 403 with a human message if the caller lacks `flag` on this job."""
     if not access.can(flag):
         raise HTTPException(status_code=403, detail=_DENIED_MESSAGE.get(flag, "You don't have permission to do this."))
+
+
+_CANDIDATE_NOT_FOUND = "Candidate not found"
+
+
+async def accessible_job_ids(user: dict):
+    """Job ids a recruiter may see (active assignments). Returns None for a
+    manager, meaning 'every job in the org'."""
+    if is_manager(user):
+        return None
+    rows = await job_assignments.find(
+        {"org_id": user.get("org_id"), "user_id": user["id"], "status": "active"},
+        {"_id": 0, "job_id": 1},
+    ).to_list(100000)
+    return [r["job_id"] for r in rows]
+
+
+def candidate_scope_filter(access: JobAccess, user: dict) -> dict:
+    """Extra Mongo filter limiting a recruiter to their own sourced candidates,
+    unless they may view the whole team's on this job. Managers add nothing."""
+    if access.scope == "assigned" and not access.can("can_view_team_candidates"):
+        return {"sourced_by": user["id"]}
+    return {}
+
+
+async def resolve_candidate_access(user: dict, candidate_id: str):
+    """(candidate, JobAccess) or 404. Enforces org, job access, and per-recruiter
+    candidate visibility — all as 404 so nothing about another org/recruiter's
+    data is confirmed."""
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=404, detail=_CANDIDATE_NOT_FOUND)
+    cand = await candidates.find_one({"id": candidate_id, "org_id": org_id}, {"_id": 0})
+    if not cand:
+        raise HTTPException(status_code=404, detail=_CANDIDATE_NOT_FOUND)
+    access = await resolve_job_access(user, cand["job_id"])  # 404 if no job access
+    if (access.scope == "assigned"
+            and not access.can("can_view_team_candidates")
+            and cand.get("sourced_by") != user["id"]):
+        raise HTTPException(status_code=404, detail=_CANDIDATE_NOT_FOUND)
+    return cand, access
 
 
 async def resolve_jd(access: JobAccess, user_id: str) -> dict:

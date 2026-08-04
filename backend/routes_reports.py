@@ -1,4 +1,9 @@
-"""Hiring analytics, scoped to the signed-in user.
+"""Hiring analytics, scoped by organisation and role.
+
+A **manager** ("Admin") sees the whole org's analytics; a **recruiter** ("User")
+sees a personal report over their assigned jobs and the candidates they sourced
+(§7). Same org+assignment spine as every other route (permissions.py).
+
 
 Everything here is computed from real records — there are no sampled or
 synthetic figures. Where a number cannot be derived honestly it is omitted
@@ -16,7 +21,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from database import jobs, candidates, stage_transitions
-from auth import get_current_user
+import permissions
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -378,12 +383,36 @@ def _insights(tth: dict, funnel: list, aging: list, sources: list, quota: list,
 # Endpoint
 # ---------------------------------------------------------------------------
 
+async def _empty_report() -> dict:
+    """The shape returned when a recruiter has no assignments — every section
+    present but empty, so the frontend never has to special-case a missing key."""
+    empty_tth = {"per_job": [], "overall_avg": None, "total_hires": 0, "recent_avg": None, "previous_avg": None}
+    return {
+        "time_to_hire": empty_tth, "funnel": _funnel([], {}), "biggest_drop_off": None,
+        "sources": [], "has_source_data": False, "postings_over_time": _postings_over_time([]),
+        "aging_postings": [], "quota_tracker": [], "insights": [],
+        "totals": {"jobs": 0, "open_jobs": 0, "candidates": 0, "hired": 0, "unanalyzed": 0},
+    }
+
+
 @router.get("")
-async def reports(user: dict = Depends(get_current_user)) -> dict:
-    user_jobs = await jobs.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+async def reports(user: dict = Depends(permissions.require_org_member)) -> dict:
+    # Manager → whole org. Recruiter → assigned jobs and their sourced candidates.
+    accessible = await permissions.accessible_job_ids(user)  # None = manager (all)
+    if accessible == []:
+        return await _empty_report()
+
+    job_query = {"org_id": user["org_id"]}
+    if accessible is not None:
+        job_query["id"] = {"$in": accessible}
+    user_jobs = await jobs.find(job_query, {"_id": 0}).to_list(1000)
     job_ids = [j["id"] for j in user_jobs]
+    cand_query = {"job_id": {"$in": job_ids}}
+    if accessible is not None:
+        # Recruiter's personal report: only the candidates they sourced (§7).
+        cand_query["sourced_by"] = user["id"]
     all_cands = await candidates.find(
-        {"job_id": {"$in": job_ids}}, {"_id": 0, "resume_text": 0}
+        cand_query, {"_id": 0, "resume_text": 0}
     ).to_list(50000)
 
     cands_by_job = defaultdict(list)

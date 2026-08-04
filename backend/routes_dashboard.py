@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from database import jobs, candidates
-from auth import get_current_user
+import permissions
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -64,10 +64,26 @@ def _build_upcoming(user_jobs: list, all_cands: list) -> list:
 
 
 @router.get("")
-async def dashboard(user: dict = Depends(get_current_user)):
-    user_jobs = await jobs.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+async def dashboard(user: dict = Depends(permissions.require_org_member)):
+    # Manager → the whole org's jobs and candidates. Recruiter → only their
+    # assigned jobs, and (without can_view_team_candidates) only candidates they
+    # sourced. Same org+assignment spine as every other list route.
+    accessible = await permissions.accessible_job_ids(user)  # None = manager (all)
+    if accessible == []:
+        # Recruiter with no active assignments — nothing to show.
+        return {"stats": _compute_stats([], []), "jobs_summary": [], "action_items": [], "upcoming_interviews": []}
+
+    job_query = {"org_id": user["org_id"]}
+    if accessible is not None:
+        job_query["id"] = {"$in": accessible}
+    user_jobs = await jobs.find(job_query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     job_ids = [j["id"] for j in user_jobs]
-    all_cands = await candidates.find({"job_id": {"$in": job_ids}}, {"_id": 0}).to_list(10000)
+    cand_query = {"job_id": {"$in": job_ids}}
+    if accessible is not None:
+        # A recruiter's dashboard counts only the candidates they sourced — the
+        # conservative choice, matching the "personal reports" rule (§7).
+        cand_query["sourced_by"] = user["id"]
+    all_cands = await candidates.find(cand_query, {"_id": 0}).to_list(10000)
 
     by_job = _group_by_job(all_cands)
     stats = _compute_stats(user_jobs, all_cands)

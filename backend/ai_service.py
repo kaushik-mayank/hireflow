@@ -158,11 +158,12 @@ COST_TABLE = {
     "structure":       {"tokens": 2000, "cost": 0.002},
 }
 
-async def log_usage(action: str, user_id: str = None, job_id: str = None, candidate_id: str = None):
+async def log_usage(action: str, user_id: str = None, job_id: str = None, candidate_id: str = None, org_id: str = None):
     est = COST_TABLE.get(action, {"tokens": 1000, "cost": 0.001})
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
+        "org_id": org_id,
         "job_id": job_id,
         "candidate_id": candidate_id,
         "action": action,
