@@ -59,6 +59,11 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="User not found")
     if not user.get("is_active", 1):
         raise HTTPException(status_code=403, detail="Account deactivated")
+    # Org suspension (Cycle 2): checked on EVERY request, not just at login, so a
+    # manager suspending a recruiter revokes their live session immediately. 401
+    # (re-authenticate) rather than 403, and a message that says what happened.
+    if user.get("status") == "disabled":
+        raise HTTPException(status_code=401, detail="Your access has been suspended. Contact your admin.")
     return user
 
 

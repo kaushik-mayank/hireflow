@@ -3,11 +3,12 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Request
 
-from database import users, login_activity, organizations
+from database import users, login_activity, organizations, invitations
 from auth import hash_password, verify_password, create_token, get_current_user
 from admin_identity import effective_role, HR_ROLE
-from models import SignupRequest, LoginRequest, FirebaseAuthRequest
+from models import SignupRequest, LoginRequest, FirebaseAuthRequest, AcceptInviteRequest
 import firebase_auth
+import invites
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -233,6 +234,101 @@ async def firebase_exchange(body: FirebaseAuthRequest, request: Request):
 
     await _record_login(user, request)
     return {"verified": True, "token": create_token(user), "user": _public_user(user)}
+
+
+async def _accept_rate_limited(inv: dict, now: datetime) -> bool:
+    """Per-token throttle on accept attempts, so a leaked/guessed token can't be
+    hammered. A rolling one-hour window stored on the invitation doc."""
+    window_start = inv.get("accept_window_start")
+    attempts = inv.get("accept_attempts", 0)
+    cutoff = invites.one_hour_ago_iso(now)
+    if not window_start or window_start < cutoff:
+        window_start, attempts = now.isoformat(), 0
+    if not invites.within_rate_limit(attempts, invites.ACCEPT_ATTEMPTS_PER_HOUR):
+        return True
+    await invitations.update_one(
+        {"id": inv["id"]},
+        {"$set": {"accept_window_start": window_start, "accept_attempts": attempts + 1}},
+    )
+    return False
+
+
+# Friendly, non-leaking messages for a token that can't be accepted.
+_ACCEPT_MESSAGE = {
+    invites.ACCEPTED: (409, "You've already set up your account — please sign in."),
+    invites.EXPIRED: (410, "This invitation has expired. Ask your admin to resend it."),
+    invites.REVOKED: (400, "This invitation link is no longer valid."),
+    invites.UNKNOWN: (400, "This invitation link is no longer valid."),
+}
+
+
+@router.post("/accept-invite")
+async def accept_invite(body: AcceptInviteRequest, request: Request):
+    """Complete a recruiter's onboarding from an emailed invite.
+
+    Email verification is deliberately NOT required on this path: holding the
+    emailed token already proves the recruiter controls that mailbox. That bypass
+    lives here and only here — it is never a global flag, so the manager sign-up
+    path keeps requiring a verified email.
+    """
+    now = datetime.now(timezone.utc)
+    inv = await invitations.find_one({"token_hash": invites.hash_token(body.token)}, {"_id": 0})
+
+    reason = invites.invite_reason(inv, now)
+    if reason != invites.VALID:
+        code, message = _ACCEPT_MESSAGE.get(reason, (400, "This invitation link is no longer valid."))
+        raise HTTPException(status_code=code, detail=message)
+
+    if await _accept_rate_limited(inv, now):
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait a little and try again.")
+
+    if not firebase_auth.is_configured():
+        raise HTTPException(status_code=503, detail="Sign-in isn't configured on the server.")
+    try:
+        claims = firebase_auth.verify_id_token(body.firebase_id_token)
+    except firebase_auth.FirebaseAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    # The token must belong to the exact address the invite was issued to.
+    if claims["email"] != inv["email"]:
+        raise HTTPException(status_code=400, detail="This invitation was issued for a different email address.")
+
+    now_iso = now.isoformat()
+    member = await users.find_one({"email": inv["email"]}, {"_id": 0})
+    activation = {
+        "firebase_uid": claims["uid"],
+        "email_verified": claims["email_verified"],
+        "status": "active",
+        "activated_at": now_iso,
+    }
+    if member:
+        await users.update_one({"id": member["id"]}, {"$set": activation})
+        member.update(activation)
+    else:
+        # Placeholder missing (e.g. cleaned up) — recreate the recruiter row.
+        member = {
+            "id": str(uuid.uuid4()),
+            "name": claims.get("name") or inv["email"].split("@")[0],
+            "email": inv["email"],
+            "password_hash": None,
+            "role": HR_ROLE,
+            "org_id": inv["org_id"],
+            "org_role": "recruiter",
+            "invited_by": inv.get("invited_by"),
+            "is_active": 1,
+            "last_login_at": None,
+            "created_at": now_iso,
+            **activation,
+        }
+        await users.insert_one(member)
+        member.pop("_id", None)
+
+    await invitations.update_one(
+        {"id": inv["id"]}, {"$set": {"status": "accepted", "accepted_at": now_iso}}
+    )
+
+    await _record_login(member, request)
+    return {"token": create_token(member), "user": _public_user(member)}
 
 
 @router.get("/me")

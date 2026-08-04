@@ -25,6 +25,25 @@ class FirebaseAuthRequest(BaseModel):
     company: Optional[str] = None
 
 
+# ---------- Organisation / invites (Cycle 2) ----------
+class InviteCreate(BaseModel):
+    """Manager invites a recruiter. No role field — invited users are always
+    recruiters; managers arrive only through public sign-up."""
+    email: EmailStr
+    name: Optional[str] = None
+
+
+class AcceptInviteRequest(BaseModel):
+    """Recruiter completes onboarding: the invite token plus the Firebase ID
+    token proving they now hold credentials for that email."""
+    token: str
+    firebase_id_token: str
+
+
+class MemberStatusUpdate(BaseModel):
+    status: str  # "active" (reactivate) | "disabled" (suspend)
+
+
 # ---------- Jobs ----------
 class JobCreate(BaseModel):
     title: str

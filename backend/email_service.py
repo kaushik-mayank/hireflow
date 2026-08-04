@@ -86,6 +86,29 @@ def _send_blocking(msg: EmailMessage) -> None:
             server.close()
 
 
+def build_invite_email(org_name: str, inviter_name: str | None, accept_url: str) -> tuple[str, str]:
+    """(subject, plain-text body) for a recruiter invitation.
+
+    Plain text only — matches the rest of the app's mail and sidesteps the
+    HTML-email deliverability tax. The link is the single call to action; the
+    copy-paste fallback line matters because some clients mangle long URLs.
+    """
+    org = (org_name or "your team").strip()
+    who = (inviter_name or "").strip()
+    intro = f"{who} has invited you" if who else "You've been invited"
+    subject = f"You're invited to join {org} on HireFlow"
+    body = (
+        f"{intro} to join {org} on HireFlow.\n\n"
+        "HireFlow is the recruiting workspace your team uses to manage jobs and candidates.\n\n"
+        "To set up your account, open this link and choose a password:\n\n"
+        f"{accept_url}\n\n"
+        "If the link doesn't open, copy and paste the whole address into your browser.\n\n"
+        "This invitation expires in 7 days. If you weren't expecting it, you can ignore this email.\n\n"
+        "— The HireFlow team"
+    )
+    return subject, body
+
+
 async def send_email(to: str, subject: str, body: str, reply_to: str | None = None) -> bool:
     """Send one plain-text email. Returns False instead of raising on failure.
 
