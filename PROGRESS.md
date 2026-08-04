@@ -4,8 +4,38 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** Post-launch bug fixes. Live: frontend `https://hireflow.cortinix.com` (Vercel custom domain), backend `https://hireflow-w04l.onrender.com` (Render).
-**Last updated:** 2026-08-02
+**Current phase:** 🔵 **Cycle 2 — Phase 8 (re-audit, read-only) complete → awaiting go-ahead for Phase 9.** Live: frontend `https://hireflow.cortinix.com` (Vercel), backend `https://hireflow-w04l.onrender.com` (Render).
+**Last updated:** 2026-08-04
+
+---
+
+## Session 17 — 2026-08-04 — Cycle 2 Phase 8: re-audit & design lock (read-only)
+
+**Goal:** ground-truth the code before building org/manager/recruiter features; reconcile it against `PROJECT_PLAN_CYCLE2.md`; produce `CYCLE2_AUDIT.md`. **No source file changed** (docs only).
+
+### What I read
+Cycle 2 plan, `PROGRESS.md`, `PROJECT_PLAN.md`, `AUDIT.md`, then the actual code: `server.py`, `auth.py`, `database.py`, `admin_identity.py`, `firebase_auth.py`, `routes_auth/jobs/candidates/ai/dashboard/reports/feedback.py`, `models.py`, `seed.py`, `scripts/reset_accounts.py`; frontend `App.js`, `api.js`, `constants.js`, `AuthContext.jsx`, `Layout.jsx`, `lib/firebase.js`, `config/sources.js`, `Reports.jsx`, `Signup/Login/ForgotPassword`.
+
+### Deliverable
+**`CYCLE2_AUDIT.md`** — auth reality check, data-access inventory (22 `user_id`-scoped queries flagged for org+assignment scoping), frontend inventory (guards, sidebar, reusable primitives, exact `Reports.jsx` data contract), migration plan, plan-vs-code conflicts, §12 decision answers, revised file-level phase breakdown 9–15.
+
+### Key findings (design decisions to confirm before Phase 9)
+- **C1 — the JWT does not need `org_id`.** `get_current_user` re-reads the live DB user doc from the token's `userId`, so org fields are available with **no JWT change and no session invalidation**. Recommend **skipping** the planned JWT change; only extend `_public_user`/`/auth/me` with `org_role`/`status` for the frontend. Lower risk than the plan assumes.
+- **C2 — standardize cross-access on 404.** Today candidate/AI routes return **403**; jobs return 404. Plan mandates 404 (don't confirm existence). This is a deliberate behaviour change to existing routes.
+- **C3 — two "active" flags.** `is_active` (int) vs planned `status` (string). Gate on both; migration sets `status="active"`; suspension sets `status="disabled"`. Don't repurpose `is_active`.
+- **C4–C7** — `stage_transitions.moved_by` is a name not an id (add `actor_id`); `activity_events` overlaps `stage_transitions` (use each for its own KPIs); `ai_usage_log` needs `org_id` stamping; `firebase_exchange` must create an org on first manager login.
+- Roles are already cleanly separated: platform `role` (admin/hr, allowlist-derived, gates `/admin/*`) vs new `org_role` (manager/recruiter). No collision if new code never overloads `role`.
+- `Reports.jsx` analytics are already pure functions on plain dicts → reusable for per-recruiter team reports with no new charts.
+
+### §12 decisions — my answers
+1 seat 25 ✅ · 2 recruiter own jobs ⚠️ confirm (biggest complexity lever; offered to defer to Cycle 3) · 3 promote-to-manager ✅ (+≥1-active-manager invariant) · 4 suspend default ✅ · 5 `APP_URL` ✅ mandatory · 6 copy-link fallback ✅ · 7 manager sees candidate data ✅.
+
+### Not verified
+Read-only phase — nothing executed. Migration/org-creation transaction behaviour reasoned about only; must be dry-run against a DB copy before production (runbook item). No live Mongo/Firebase/SMTP/Groq here.
+
+### Owner action items (before Phase 9)
+- Confirm/challenge **C1 (skip JWT change)**, **C2 (404)**, and **decision 2 (personal jobs)** — these change scope.
+- New env var coming in Phase 10: **`APP_URL`** (invite links).
 
 ---
 
