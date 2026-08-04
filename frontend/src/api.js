@@ -40,6 +40,9 @@ export const authApi = {
   login: (data) => client.post("/auth/login", data),
   // Exchanges a verified Firebase ID token for this app's own JWT.
   firebase: (data) => client.post("/auth/firebase", data),
+  // Tells the login page whether an email needs first-time password setup,
+  // can sign in normally, or isn't recognised.
+  onboardingStatus: (email) => client.post("/auth/onboarding-status", { email }),
   me: () => client.get("/auth/me"),
 };
 

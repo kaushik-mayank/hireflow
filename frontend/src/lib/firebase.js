@@ -205,6 +205,23 @@ export async function firebaseSignInRaw(email, password) {
 }
 
 /**
+ * Create a Firebase account for an admin-approved teammate on their first
+ * sign-in and return a fresh ID token, leaving them signed in so the caller can
+ * immediately exchange it for an app session. No verification email is sent:
+ * an approved recruiter's admin already vouched for the address, and the backend
+ * activates them without a verification step.
+ *
+ * @returns {Promise<{idToken: string}>}
+ */
+export async function firebaseCreateAccount(email, password) {
+  const auth = await getAuthInstance();
+  const { createUserWithEmailAndPassword } = await import("firebase/auth");
+  const cred = await createUserWithEmailAndPassword(auth, email, password);
+  const idToken = await cred.user.getIdToken(true);
+  return { idToken };
+}
+
+/**
  * Resend the verification link to the currently signed-in user and sign them
  * out, so an unverified public sign-up doesn't linger in a Firebase session.
  * Safe to call when nobody is signed in.

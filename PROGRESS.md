@@ -4,8 +4,37 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 14a backend (manager team-report API) complete. ⚠️ Frontend Sessions 22 + 24 still need an owner `CI=true yarn build`. Next: Phase 14 remaining panels/CSV + Phases 13/14 frontend.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Session 26: fixed recruiter first-login (email-first / create-password) + onboarding-status API. ⚠️ Frontend (Sessions 22/24/26) needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-05
+
+---
+
+## Session 26 — 2026-08-05 — Cycle 2 fix: recruiter first-login (email-first sign-in + create-password)
+
+**Owner-reported gap:** an admin-approved teammate had no way to set a password from the **login** page — my Phase 10b design quietly assumed they'd use `/signup`. Required industry-standard flow: on login, enter email → if approved-but-new, a **"create your password"** screen; if not recognised, a **professional "ask your admin / sign up"** message; otherwise the normal password prompt.
+
+### Backend (offline-tested)
+- **`POST /auth/onboarding-status`** (public) → `{status}`:
+  - `needs_setup` — user exists, admin-approved, **no credentials yet** (no `firebase_uid`/`password_hash`).
+  - `registered` — has credentials → ask for password.
+  - `not_approved` — no such account (or suspended → kept neutral).
+  Returns only a coarse status (no name/org). Revealing "set a password" vs "unknown" is the intended, owner-requested behaviour of admin-approved onboarding.
+- **`models.py`** `OnboardingCheck`.
+- Tests: `test_org_and_auth.py` +4 (not_approved / needs_setup / registered / disabled-is-neutral). **289 offline tests pass forwards AND reverse** (285 → 289).
+
+### Frontend (⚠️ NOT built here — no Node)
+- **`pages/Login.jsx`** rewritten as an **email-first, 3-state** flow: `email` → (`onboarding-status`) → `create` (new password + confirm + strength meter → `firebaseCreateAccount` → `/auth/firebase` → straight into the app) or `password` (normal sign-in; legacy-password + Session-15 "server failure ≠ wrong password" rules preserved). A "← email" affordance changes the address. `not_approved` shows the professional message only after a real sign-in miss; a mid-flow `email-already-in-use` on create falls back to signing in.
+- **`lib/firebase.js`** `firebaseCreateAccount(email, password)` — creates the account and returns a fresh ID token (no verification email; approved recruiters skip it), leaving them signed in for immediate exchange.
+- **`api.js`** `authApi.onboardingStatus`.
+- Checked: no unused imports / dangling refs in the edited files.
+
+### What was NOT verified (honesty)
+- **No `CI=true yarn build`** and no runtime click-through of the new login flow — the main gap. Static checks only.
+- Backend onboarding-status has **no rate limit** yet — it's an email-existence oracle by design; add throttling before heavy exposure (Phase 15 hardening).
+
+### Owner action items
+1. **Run `CI=true yarn build`** (now covers Sessions 22, 24, 26) and paste any errors.
+2. QA the flow: approved email → login → **Set your password** → lands in app as a User; unknown email → login → professional "ask your admin / Sign up" message; existing user → normal password sign-in; new manager still uses **Sign up** (verify email) then signs in.
 
 ---
 

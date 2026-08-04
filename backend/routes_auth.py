@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from database import users, login_activity, organizations
 from auth import hash_password, verify_password, create_token, get_current_user
 from admin_identity import effective_role, HR_ROLE
-from models import SignupRequest, LoginRequest, FirebaseAuthRequest
+from models import SignupRequest, LoginRequest, FirebaseAuthRequest, OnboardingCheck
 import firebase_auth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -244,6 +244,32 @@ async def firebase_exchange(body: FirebaseAuthRequest, request: Request):
 
     await _record_login(user, request)
     return {"verified": True, "token": create_token(user), "user": _public_user(user)}
+
+
+@router.post("/onboarding-status")
+async def onboarding_status(body: OnboardingCheck):
+    """Tell the login page how to greet this email (public, no auth):
+
+    - `needs_setup` — an admin approved them but they have no credentials yet, so
+      show a "create your password" screen.
+    - `registered`  — they already have credentials, so ask for their password.
+    - `not_approved` — no account; ask them to check with their admin or, if
+      they're starting an organisation, to sign up.
+
+    Returns only a coarse status (no name, no org), and the behaviour is
+    deliberate: the whole point of admin-approved onboarding is to tell an
+    approved teammate to set a password and an unknown email that it isn't set up.
+    """
+    email = body.email.lower().strip()
+    user = await users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        return {"status": "not_approved"}
+    if user.get("status") == "disabled":
+        # Don't offer setup/sign-in to a suspended account; keep it neutral.
+        return {"status": "not_approved"}
+    if user.get("firebase_uid") or user.get("password_hash"):
+        return {"status": "registered"}
+    return {"status": "needs_setup"}
 
 
 @router.get("/me")

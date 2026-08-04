@@ -18,6 +18,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class OnboardingCheck(BaseModel):
+    """The login page asks this before showing a password field, so it can offer
+    first-time password setup to an admin-approved recruiter, a normal sign-in to
+    an existing account, or a clear 'ask your admin' message otherwise."""
+    email: EmailStr
+
+
 class FirebaseAuthRequest(BaseModel):
     """Exchange a Firebase ID token for this app's own JWT."""
     id_token: str

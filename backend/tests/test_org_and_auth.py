@@ -174,7 +174,7 @@ def world():
     _merge_stub("firebase_auth", is_configured=_fb_is_configured, verify_id_token=_fb_verify,
                 FirebaseAuthError=_FirebaseAuthError)
 
-    for mdl in ("SignupRequest", "LoginRequest", "FirebaseAuthRequest",
+    for mdl in ("SignupRequest", "LoginRequest", "FirebaseAuthRequest", "OnboardingCheck",
                 "MemberCreate", "BulkMemberCreate", "MemberStatusUpdate"):
         _merge_stub("models", **{mdl: object})
 
@@ -407,6 +407,34 @@ def test_suspended_user_cannot_exchange(world):
             _ns(client=None, headers={}),
         ))
     assert e.value.status_code == 403
+
+
+# ===========================================================================
+# onboarding-status (drives the login page's first-time-setup flow)
+# ===========================================================================
+
+def test_onboarding_status_not_approved(world):
+    _seed(world, users=[MANAGER])
+    out = run(world.auth_routes.onboarding_status(_ns(email="stranger@nowhere.com")))
+    assert out["status"] == "not_approved"
+
+
+def test_onboarding_status_needs_setup(world):
+    _seed(world, users=[MANAGER, _approved()])  # approved, no firebase_uid/password_hash
+    out = run(world.auth_routes.onboarding_status(_ns(email="rue@alpha.com")))
+    assert out["status"] == "needs_setup"
+
+
+def test_onboarding_status_registered(world):
+    _seed(world, users=[MANAGER, {**_approved(), "firebase_uid": "fb-x", "status": "active"}])
+    out = run(world.auth_routes.onboarding_status(_ns(email="rue@alpha.com")))
+    assert out["status"] == "registered"
+
+
+def test_onboarding_status_disabled_is_neutral(world):
+    _seed(world, users=[MANAGER, {**_approved(), "firebase_uid": "fb-x", "status": "disabled"}])
+    out = run(world.auth_routes.onboarding_status(_ns(email="rue@alpha.com")))
+    assert out["status"] == "not_approved"  # suspended -> don't offer sign-in/setup
 
 
 # ===========================================================================
