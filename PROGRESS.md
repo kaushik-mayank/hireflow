@@ -4,8 +4,42 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 10a (invitation & first-login auth — backend) complete → Phase 10b (frontend `/accept-invite` + invite hooks) next, awaiting "continue".** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Phase 10a reworked to approved-email onboarding (backend) complete → Phase 10b (frontend: Add-user/team UI + recruiter first-login) next, awaiting "continue".** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-04
+
+---
+
+## Session 21 — 2026-08-04 — Cycle 2 Phase 10a REWORK: approved-email onboarding (no invite emails)
+
+**Owner decision (supersedes Session 20's emailed-invite flow):** This release must NOT send invitation emails or use SMTP/tokens for onboarding. Instead an admin ("Manager") **stores approved recruiter emails** (typed one at a time or pasted/bulk-uploaded); only those emails may join the org, and each recruiter **sets their own password the first time they sign in**, then can change it via the normal reset. The emailed-token machinery is to be **kept dormant in code** for a future cycle (where admins purchase plans and formal invites return). Also required: **role is sticky** — an admin always signs in as admin, an approved user always as a recruiter.
+
+### What changed vs Session 20
+- **`routes_orgs.py` — rewritten** around approved emails, no tokens/email:
+  - `POST /orgs/members` — approve one email (seat + duplicate guards); creates a recruiter placeholder `status="approved"`, `password_hash=None` (they set it themselves).
+  - `POST /orgs/members/bulk` — approve many: server splits a typed/pasted/CSV blob on commas/semicolons/whitespace/newlines, validates + de-dupes, adds up to the remaining seats, and **returns every skipped entry with a reason** (invalid / already on team / already registered / seat limit reached).
+  - `GET /orgs/members`, `PATCH /orgs/members/{id}` (suspend/reactivate — self + last-admin + cross-org guards), **`DELETE /orgs/members/{id}`** (remove an approved-but-not-activated email to free a seat; 409 for an already-active member — reassignment removal is a later update), `GET /orgs/me`.
+  - **Removed**: `create_invite`/`resend`/`revoke`/public `GET /invites/{token}` (token + email).
+- **`routes_auth.py`** — **removed `POST /auth/accept-invite`** and its throttle/messages. `firebase_exchange` now **activates an approved recruiter on first sign-in**: finds the `status in (approved, invited)` placeholder → sets `status="active"`, keeps their `org_id` + `org_role="recruiter"` (role stays sticky), and **bypasses email verification for them only** (the admin already vouched). A brand-new, unapproved email still becomes its own **manager** via public sign-up (unchanged), so admins always land as admin and approved users always as recruiter.
+- **`server.py`** — dropped the public `/invites` router registration.
+- **`email_service.py`** — removed the now-dead `build_invite_email`.
+- **`models.py`** — `InviteCreate`/`AcceptInviteRequest` → **`MemberCreate`** + **`BulkMemberCreate`**; kept `MemberStatusUpdate`.
+- **Kept dormant (reserved for a future cycle, documented in-file):** `invites.py` (token/hash/state helpers) and the `invitations` collection + its indexes. `auth.get_current_user` suspension gate (401 on `status="disabled"`) is unchanged and stays.
+
+### Tests (offline; forwards AND reverse green)
+- **`tests/test_org_and_auth.py` — rewritten (22)**: add-member happy/duplicate/existing/seat-limit, bulk parse+skip-reasons+seat cap, list/remove (approved frees seat, active→409, cross-org→404), suspend/self/last-admin/cross-org, `org_me` seats, **`firebase_exchange`**: approved recruiter activates (verified even if email unverified, joins admin's org, sticky recruiter role) / new unapproved email → own manager / unverified public manager → no session / suspended → 403, and the real `get_current_user` suspension gate.
+- **`tests/test_invites.py` (12) kept** — the dormant token helpers still have full unit coverage so the future cycle inherits a tested base.
+- **248 offline tests pass forwards AND reverse.** All changed files `py_compile` clean.
+
+### What was NOT verified (honesty)
+- **Nothing run against Mongo or real Firebase.** Approval/seat/activation logic is unit + stub-route tested only.
+- **Trust simplification (intended for this pre-plan release):** approving an email lets whoever first signs in with that email (via Firebase) claim the recruiter seat, and their sign-in is accepted without a separate email-verification step. This is acceptable now because the admin explicitly vouches for the address; a stricter proof-of-ownership step is a future-cycle item (tracked with the dormant invite tokens).
+- **No frontend** this session → no `yarn build`. Phase 10b wires the Add-user/bulk-upload UI, the team list with seats/suspend/remove, and the recruiter first-login (Firebase create-password) screen. Until then, approvals are API-only.
+- Member **remove-with-reassignment** for *active* members stays deferred to Phase 11.
+
+### Owner action items (updated)
+- **`APP_URL` is no longer required** for onboarding (invite links are gone). Keep it only if you want it for other links; onboarding no longer 503s without it.
+- **SMTP is not needed** for onboarding anymore. (Still used for the feedback email path.)
+- Recruiters sign in through the same Firebase flow as admins; the frontend needs a "set your password" (first sign-in) path for approved users — Phase 10b.
 
 ---
 

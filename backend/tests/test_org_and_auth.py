@@ -1,5 +1,9 @@
-"""Route-level tests for Phase 10a: recruiter invitations, accept-invite, member
-suspension, org summary, and the get_current_user suspension gate.
+"""Route-level tests for the approved-email onboarding flow (Cycle 2).
+
+No emailed invitations in this release: an admin stores approved recruiter emails
+(single or bulk); each recruiter sets their own password on first Firebase
+sign-in, which activates them with a sticky recruiter role. Brand-new,
+unapproved emails become their own manager (public manager sign-up).
 
 Offline. Stubs the modules that need native deps (jwt, bcrypt, motor/database,
 firebase_auth) but imports the REAL auth / permissions / routes_orgs / routes_auth
@@ -11,7 +15,6 @@ import asyncio
 import os
 import sys
 import types
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -112,7 +115,6 @@ class _APIRouter:
     get = post = put = patch = delete = _decorator
 
 
-# Firebase stub whose behaviour tests drive through the token string.
 class _FirebaseAuthError(Exception):
     pass
 
@@ -132,7 +134,6 @@ def _fb_verify(tok):
     return {"uid": "fb-" + email, "email": email.lower(), "email_verified": verified == "1", "name": None}
 
 
-# jwt / bcrypt stubs (auth.py imports them at module load).
 class _ExpiredSignatureError(Exception):
     pass
 
@@ -142,7 +143,6 @@ def _jwt_encode(payload, secret, algorithm=None):
 
 
 def _jwt_decode(token, secret, algorithms=None):
-    # In tests the bearer token IS the user id, so get_current_user resolves it.
     return {"userId": token}
 
 
@@ -154,7 +154,6 @@ MANAGER = {"id": "mgr", "org_id": "org-A", "org_role": "manager", "status": "act
 @pytest.fixture(scope="module")
 def world():
     os.environ.setdefault("JWT_SECRET", "test-secret")
-    os.environ["APP_URL"] = "https://app.test"
 
     _merge_stub("fastapi", HTTPException=_HTTPException, Depends=lambda dep=None: None,
                 APIRouter=_APIRouter, Request=object, status=types.SimpleNamespace())
@@ -175,15 +174,13 @@ def world():
     _merge_stub("firebase_auth", is_configured=_fb_is_configured, verify_id_token=_fb_verify,
                 FirebaseAuthError=_FirebaseAuthError)
 
-    for mdl in ("SignupRequest", "LoginRequest", "FirebaseAuthRequest", "AcceptInviteRequest",
-                "InviteCreate", "MemberStatusUpdate"):
+    for mdl in ("SignupRequest", "LoginRequest", "FirebaseAuthRequest",
+                "MemberCreate", "BulkMemberCreate", "MemberStatusUpdate"):
         _merge_stub("models", **{mdl: object})
 
-    # Force the REAL auth module against our jwt/bcrypt/database stubs.
     sys.modules.pop("auth", None)
     import auth
     import permissions
-    import invites
     import routes_orgs
     import routes_auth
 
@@ -193,7 +190,7 @@ def world():
                 setattr(module, name, coll)
 
     return types.SimpleNamespace(
-        auth=auth, orgs=routes_orgs, auth_routes=routes_auth, invites=invites,
+        auth=auth, orgs=routes_orgs, auth_routes=routes_auth,
         colls=colls, exc=sys.modules["fastapi"].HTTPException,
     )
 
@@ -202,9 +199,8 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def _seed(world, *, users=(), invitations=(), organizations=(ORG_A,)):
+def _seed(world, *, users=(), organizations=(ORG_A,)):
     world.colls["users"].docs = [dict(u) for u in users]
-    world.colls["invitations"].docs = [dict(i) for i in invitations]
     world.colls["organizations"].docs = [dict(o) for o in organizations]
     world.colls["login_activity"].docs = []
 
@@ -213,216 +209,103 @@ def _ns(**kw):
     return types.SimpleNamespace(**kw)
 
 
-def _pending_invite(email="rue@alpha.com", token="rawtok", days=7, status="pending"):
-    from datetime import datetime as _dt, timezone as _tz
-    import invites as _inv
-    exp = (_dt.now(_tz.utc) + timedelta(days=days)).isoformat()
-    return {
-        "id": "inv-1", "org_id": "org-A", "email": email,
-        "token_hash": _inv.hash_token(token), "invited_by": "mgr",
-        "status": status, "expires_at": exp, "accepted_at": None,
-        "resent_count": 0, "last_sent_at": _dt.now(_tz.utc).isoformat(),
-        "created_at": _dt.now(_tz.utc).isoformat(),
-    }
-
-
-def _invited_member(email="rue@alpha.com"):
-    return {"id": "u-rue", "name": "Rue", "email": email, "org_id": "org-A",
-            "org_role": "recruiter", "status": "invited", "role": "hr", "is_active": 1}
+def _approved(email="rue@alpha.com", uid="u-rue"):
+    return {"id": uid, "name": "Rue", "email": email, "org_id": "org-A",
+            "org_role": "recruiter", "status": "approved", "role": "hr", "is_active": 1,
+            "firebase_uid": None, "password_hash": None}
 
 
 # ===========================================================================
-# create_invite
+# add_member (single)
 # ===========================================================================
 
-def test_create_invite_happy_path(world):
+def test_add_member_happy_path(world):
     _seed(world, users=[MANAGER])
-    out = run(world.orgs.create_invite(_ns(email="Rue@Alpha.com", name="Rue"), MANAGER))
-    assert out["invite"]["email"] == "rue@alpha.com"
-    assert out["invite"]["status"] == "pending"
-    assert out["accept_url"].startswith("https://app.test/accept-invite?token=")
-    assert out["email_sent"] is False  # SMTP not configured offline
-    # A placeholder member row and an invitation row now exist.
-    assert any(u["email"] == "rue@alpha.com" and u["status"] == "invited" for u in world.colls["users"].docs)
-    assert len(world.colls["invitations"].docs) == 1
-    # The stored invitation never holds the raw token.
-    assert "rawtok" not in str(world.colls["invitations"].docs[0])
+    out = run(world.orgs.add_member(_ns(email="Rue@Alpha.com", name="Rue"), MANAGER))
+    assert out["email"] == "rue@alpha.com"
+    assert out["org_role"] == "recruiter"
+    assert out["status"] == "approved"
+    row = next(u for u in world.colls["users"].docs if u["email"] == "rue@alpha.com")
+    assert row["password_hash"] is None and row["firebase_uid"] is None  # they set it later
 
 
-def test_create_invite_rejects_existing_teammate(world):
-    _seed(world, users=[MANAGER, {**_invited_member(), "status": "active", "email": "rue@alpha.com"}])
+def test_add_member_rejects_existing_teammate(world):
+    _seed(world, users=[MANAGER, {**_approved(), "status": "active"}])
     with pytest.raises(world.exc) as e:
-        run(world.orgs.create_invite(_ns(email="rue@alpha.com", name=None), MANAGER))
+        run(world.orgs.add_member(_ns(email="rue@alpha.com", name=None), MANAGER))
     assert e.value.status_code == 409
 
 
-def test_create_invite_seat_limit(world):
-    # seat_limit is 3: manager + 2 invited fills it.
-    members = [MANAGER,
-               {**_invited_member("a@alpha.com"), "id": "a"},
-               {**_invited_member("b@alpha.com"), "id": "b"}]
-    _seed(world, users=members)
+def test_add_member_rejects_duplicate_approval(world):
+    _seed(world, users=[MANAGER, _approved()])
     with pytest.raises(world.exc) as e:
-        run(world.orgs.create_invite(_ns(email="c@alpha.com", name=None), MANAGER))
+        run(world.orgs.add_member(_ns(email="rue@alpha.com", name=None), MANAGER))
+    assert e.value.status_code == 409
+    assert "approved" in e.value.detail.lower()
+
+
+def test_add_member_seat_limit(world):
+    members = [MANAGER, {**_approved("a@alpha.com", "a")}, {**_approved("b@alpha.com", "b")}]
+    _seed(world, users=members)  # seat_limit 3, already full
+    with pytest.raises(world.exc) as e:
+        run(world.orgs.add_member(_ns(email="c@alpha.com", name=None), MANAGER))
     assert e.value.status_code == 409
     assert "seat" in e.value.detail.lower()
 
 
-def test_create_invite_requires_app_url(world):
+# ===========================================================================
+# add_members_bulk
+# ===========================================================================
+
+def test_bulk_add_parses_and_skips(world):
     _seed(world, users=[MANAGER])
-    os.environ["APP_URL"] = ""
-    try:
-        with pytest.raises(world.exc) as e:
-            run(world.orgs.create_invite(_ns(email="x@alpha.com", name=None), MANAGER))
-        assert e.value.status_code == 503
-    finally:
-        os.environ["APP_URL"] = "https://app.test"
+    text = "one@alpha.com, two@alpha.com\nnot-an-email  three@alpha.com; two@alpha.com"
+    out = run(world.orgs.add_members_bulk(_ns(text=text), MANAGER))
+    added = {a["email"] for a in out["added"]}
+    skipped = {s["email"]: s["reason"] for s in out["skipped"]}
+    # 3 unique valid emails, but seat_limit 3 with manager already using one -> 2 seats.
+    assert added == {"one@alpha.com", "two@alpha.com"}
+    assert skipped.get("not-an-email") == "not a valid email"
+    assert skipped.get("three@alpha.com") == "seat limit reached"
+    assert out["seat_limit"] == 3 and out["seats_used"] == 3
+
+
+def test_bulk_add_reports_existing(world):
+    _seed(world, users=[MANAGER, {**_approved("dupe@alpha.com", "d")}])
+    out = run(world.orgs.add_members_bulk(_ns(text="dupe@alpha.com new@alpha.com"), MANAGER))
+    assert {a["email"] for a in out["added"]} == {"new@alpha.com"}
+    assert any(s["email"] == "dupe@alpha.com" for s in out["skipped"])
 
 
 # ===========================================================================
-# list / resend / revoke
+# list / remove members
 # ===========================================================================
 
-def test_list_invites_returns_pending_only(world):
-    _seed(world, users=[MANAGER],
-          invitations=[_pending_invite(), {**_pending_invite("old@alpha.com", "t2"), "id": "inv-2", "status": "revoked"}])
-    rows = run(world.orgs.list_invites(MANAGER))
-    assert {r["id"] for r in rows} == {"inv-1"}
+def test_list_members_includes_approved_and_active(world):
+    _seed(world, users=[MANAGER, _approved()])
+    rows = run(world.orgs.list_members(MANAGER))
+    assert {r["email"] for r in rows} == {"mona@alpha.com", "rue@alpha.com"}
 
 
-def test_resend_rotates_token(world):
-    inv = _pending_invite(token="oldtok")
-    _seed(world, users=[MANAGER, _invited_member()], invitations=[inv])
-    old_hash = world.colls["invitations"].docs[0]["token_hash"]
-    out = run(world.orgs.resend_invite("inv-1", MANAGER))
-    new_hash = world.colls["invitations"].docs[0]["token_hash"]
-    assert new_hash != old_hash                      # old link no longer works
-    assert out["invite"]["resent_count"] == 1
-    assert out["accept_url"].startswith("https://app.test/accept-invite?token=")
-
-
-def test_revoke_marks_revoked_and_frees_seat(world):
-    _seed(world, users=[MANAGER, _invited_member()], invitations=[_pending_invite()])
-    out = run(world.orgs.revoke_invite("inv-1", MANAGER))
+def test_remove_approved_member_frees_seat(world):
+    _seed(world, users=[MANAGER, _approved()])
+    out = run(world.orgs.remove_member("u-rue", MANAGER))
     assert out["success"] is True
-    assert world.colls["invitations"].docs[0]["status"] == "revoked"
-    # placeholder member removed → seat freed
-    assert not any(u["email"] == "rue@alpha.com" for u in world.colls["users"].docs)
+    assert not any(u["id"] == "u-rue" for u in world.colls["users"].docs)
 
 
-def test_revoke_accepted_invite_is_409(world):
-    _seed(world, users=[MANAGER], invitations=[{**_pending_invite(), "status": "accepted"}])
+def test_remove_active_member_is_409(world):
+    _seed(world, users=[MANAGER, {**_approved(), "status": "active"}])
     with pytest.raises(world.exc) as e:
-        run(world.orgs.revoke_invite("inv-1", MANAGER))
+        run(world.orgs.remove_member("u-rue", MANAGER))
     assert e.value.status_code == 409
 
 
-def test_manager_cannot_touch_another_orgs_invite(world):
-    _seed(world, users=[MANAGER], invitations=[{**_pending_invite(), "org_id": "org-B"}])
+def test_remove_cross_org_is_404(world):
+    _seed(world, users=[MANAGER, {**_approved(), "org_id": "org-B"}])
     with pytest.raises(world.exc) as e:
-        run(world.orgs.revoke_invite("inv-1", MANAGER))
-    assert e.value.status_code == 404  # scoped by org_id → not found
-
-
-# ===========================================================================
-# validate_invite (public)
-# ===========================================================================
-
-def test_validate_valid_token(world):
-    _seed(world, users=[MANAGER], invitations=[_pending_invite()])
-    out = run(world.orgs.validate_invite("rawtok"))
-    assert out["valid"] is True
-    assert out["email"] == "rue@alpha.com"
-    assert out["org_name"] == "Alpha Agency"
-
-
-def test_validate_expired_token_is_neutral(world):
-    _seed(world, users=[MANAGER], invitations=[_pending_invite(days=-1)])
-    out = run(world.orgs.validate_invite("rawtok"))
-    assert out["valid"] is False
-    assert out["reason"] == "expired"
-    assert "email" not in out  # no PII leaked for an unusable token
-
-
-def test_validate_unknown_token(world):
-    _seed(world, users=[MANAGER], invitations=[])
-    out = run(world.orgs.validate_invite("nope"))
-    assert out == {"valid": False, "reason": "unknown"}
-
-
-# ===========================================================================
-# accept_invite
-# ===========================================================================
-
-def test_accept_invite_happy_path(world):
-    _FB["configured"] = True
-    _seed(world, users=[MANAGER, _invited_member()], invitations=[_pending_invite()])
-    out = run(world.auth_routes.accept_invite(
-        _ns(token="rawtok", firebase_id_token="ok:rue@alpha.com:1"),
-        _ns(client=None, headers={}),
-    ))
-    assert out["token"] == "jwt-u-rue"
-    assert out["user"]["status"] == "active"
-    member = next(u for u in world.colls["users"].docs if u["id"] == "u-rue")
-    assert member["status"] == "active" and member["firebase_uid"] == "fb-rue@alpha.com"
-    assert world.colls["invitations"].docs[0]["status"] == "accepted"
-
-
-def test_accept_invite_wrong_email(world):
-    _FB["configured"] = True
-    _seed(world, users=[MANAGER, _invited_member()], invitations=[_pending_invite()])
-    with pytest.raises(world.exc) as e:
-        run(world.auth_routes.accept_invite(
-            _ns(token="rawtok", firebase_id_token="ok:someone@else.com:1"),
-            _ns(client=None, headers={}),
-        ))
-    assert e.value.status_code == 400
-    assert world.colls["invitations"].docs[0]["status"] == "pending"  # not consumed
-
-
-def test_accept_invite_expired_is_410(world):
-    _seed(world, users=[MANAGER, _invited_member()], invitations=[_pending_invite(days=-1)])
-    with pytest.raises(world.exc) as e:
-        run(world.auth_routes.accept_invite(
-            _ns(token="rawtok", firebase_id_token="ok:rue@alpha.com:1"),
-            _ns(client=None, headers={}),
-        ))
-    assert e.value.status_code == 410
-
-
-def test_accept_invite_already_accepted_is_409(world):
-    _seed(world, users=[MANAGER], invitations=[{**_pending_invite(), "status": "accepted"}])
-    with pytest.raises(world.exc) as e:
-        run(world.auth_routes.accept_invite(
-            _ns(token="rawtok", firebase_id_token="ok:rue@alpha.com:1"),
-            _ns(client=None, headers={}),
-        ))
-    assert e.value.status_code == 409
-
-
-def test_accept_invite_firebase_not_configured_is_503(world):
-    _seed(world, users=[MANAGER, _invited_member()], invitations=[_pending_invite()])
-    _FB["configured"] = False
-    try:
-        with pytest.raises(world.exc) as e:
-            run(world.auth_routes.accept_invite(
-                _ns(token="rawtok", firebase_id_token="ok:rue@alpha.com:1"),
-                _ns(client=None, headers={}),
-            ))
-        assert e.value.status_code == 503
-    finally:
-        _FB["configured"] = True
-
-
-def test_accept_invite_bad_firebase_token_is_401(world):
-    _FB["configured"] = True
-    _seed(world, users=[MANAGER, _invited_member()], invitations=[_pending_invite()])
-    with pytest.raises(world.exc) as e:
-        run(world.auth_routes.accept_invite(
-            _ns(token="rawtok", firebase_id_token="bad-token"),
-            _ns(client=None, headers={}),
-        ))
-    assert e.value.status_code == 401
+        run(world.orgs.remove_member("u-rue", MANAGER))
+    assert e.value.status_code == 404
 
 
 # ===========================================================================
@@ -435,7 +318,6 @@ def test_suspend_member(world):
     _seed(world, users=[MANAGER, rec])
     out = run(world.orgs.update_member("u-rec", _ns(status="disabled"), MANAGER))
     assert out["status"] == "disabled"
-    assert next(u for u in world.colls["users"].docs if u["id"] == "u-rec")["status"] == "disabled"
 
 
 def test_manager_cannot_suspend_self(world):
@@ -446,14 +328,9 @@ def test_manager_cannot_suspend_self(world):
 
 
 def test_cannot_suspend_last_active_manager(world):
-    other_mgr = {"id": "mgr2", "org_id": "org-A", "org_role": "manager", "status": "active",
+    other_mgr = {"id": "mgr2", "org_id": "org-A", "org_role": "manager", "status": "disabled",
                  "name": "Moe", "email": "moe@alpha.com"}
     _seed(world, users=[MANAGER, other_mgr])
-    # Suspending the only OTHER manager while there are 2 managers is fine…
-    run(world.orgs.update_member("mgr2", _ns(status="disabled"), MANAGER))
-    # …now only MANAGER is active; suspending them (via mgr2 reactivated? no) —
-    # simulate a single active manager and try to suspend it through a peer path.
-    _seed(world, users=[MANAGER, {**other_mgr, "status": "disabled"}])
     with pytest.raises(world.exc) as e:
         run(world.orgs.update_member("mgr", _ns(status="disabled"), other_mgr))
     assert e.value.status_code == 409
@@ -471,12 +348,65 @@ def test_update_member_cross_org_is_404(world):
 # ===========================================================================
 
 def test_org_me_reports_seats(world):
-    _seed(world, users=[MANAGER, _invited_member()])
+    _seed(world, users=[MANAGER, _approved()])
     out = run(world.orgs.org_me(MANAGER))
-    assert out["org"]["name"] == "Alpha Agency"
     assert out["org"]["seat_limit"] == 3
-    assert out["org"]["seats_used"] == 2  # manager + one invited
+    assert out["org"]["seats_used"] == 2  # manager + one approved
     assert out["role"] == "manager"
+
+
+# ===========================================================================
+# firebase_exchange: approved-recruiter activation vs public manager sign-up
+# ===========================================================================
+
+def test_approved_recruiter_activates_on_first_signin(world):
+    _FB["configured"] = True
+    _seed(world, users=[MANAGER, _approved()])
+    # email_verified is False (":0"), but an approved recruiter is activated anyway.
+    out = run(world.auth_routes.firebase_exchange(
+        _ns(id_token="ok:rue@alpha.com:0", name=None, company=None),
+        _ns(client=None, headers={}),
+    ))
+    assert out["verified"] is True
+    assert out["user"]["org_role"] == "recruiter"   # role stays sticky
+    assert out["user"]["org_id"] == "org-A"          # joins the admin's org, no new org
+    row = next(u for u in world.colls["users"].docs if u["email"] == "rue@alpha.com")
+    assert row["status"] == "active" and row["firebase_uid"] == "fb-rue@alpha.com"
+
+
+def test_new_unapproved_email_becomes_manager(world):
+    _FB["configured"] = True
+    _seed(world, users=[MANAGER])
+    out = run(world.auth_routes.firebase_exchange(
+        _ns(id_token="ok:founder@beta.com:1", name="Fay", company="Beta Co"),
+        _ns(client=None, headers={}),
+    ))
+    assert out["verified"] is True
+    assert out["user"]["org_role"] == "manager"      # public sign-up -> admin
+    new_user = next(u for u in world.colls["users"].docs if u["email"] == "founder@beta.com")
+    assert new_user["org_id"] and new_user["org_id"] != "org-A"  # got their own org
+
+
+def test_new_manager_unverified_email_gets_no_session(world):
+    _FB["configured"] = True
+    _seed(world, users=[MANAGER])
+    out = run(world.auth_routes.firebase_exchange(
+        _ns(id_token="ok:unverified@beta.com:0", name=None, company=None),
+        _ns(client=None, headers={}),
+    ))
+    # A public manager sign-up still needs a verified email — no token issued.
+    assert out == {"verified": False}
+
+
+def test_suspended_user_cannot_exchange(world):
+    _FB["configured"] = True
+    _seed(world, users=[MANAGER, {**_approved(), "status": "disabled"}])
+    with pytest.raises(world.exc) as e:
+        run(world.auth_routes.firebase_exchange(
+            _ns(id_token="ok:rue@alpha.com:1", name=None, company=None),
+            _ns(client=None, headers={}),
+        ))
+    assert e.value.status_code == 403
 
 
 # ===========================================================================
@@ -484,9 +414,7 @@ def test_org_me_reports_seats(world):
 # ===========================================================================
 
 def test_get_current_user_blocks_suspended(world):
-    world.colls["users"].docs = [
-        {"id": "susp", "status": "disabled", "is_active": 1, "org_id": "org-A"},
-    ]
+    world.colls["users"].docs = [{"id": "susp", "status": "disabled", "is_active": 1, "org_id": "org-A"}]
     with pytest.raises(world.exc) as e:
         run(world.auth.get_current_user(_ns(credentials="susp")))
     assert e.value.status_code == 401
@@ -494,9 +422,7 @@ def test_get_current_user_blocks_suspended(world):
 
 
 def test_get_current_user_allows_active(world):
-    world.colls["users"].docs = [
-        {"id": "ok", "status": "active", "is_active": 1, "org_id": "org-A", "name": "OK"},
-    ]
+    world.colls["users"].docs = [{"id": "ok", "status": "active", "is_active": 1, "org_id": "org-A", "name": "OK"}]
     user = run(world.auth.get_current_user(_ns(credentials="ok")))
     assert user["id"] == "ok"
 
