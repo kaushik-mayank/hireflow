@@ -18,6 +18,7 @@ const JobDetail = lazy(() => import("@/pages/JobDetail"));
 const CandidateBoard = lazy(() => import("@/pages/CandidateBoard"));
 const CandidateDetail = lazy(() => import("@/pages/CandidateDetail"));
 const Reports = lazy(() => import("@/pages/Reports"));
+const Team = lazy(() => import("@/pages/Team"));
 
 /* The admin panel is reachable by exactly one account on the platform, so
    every HR user was downloading six pages they can never open. Lazy-loaded. */
@@ -79,6 +80,18 @@ function AdminRoute({ children }) {
   return children;
 }
 
+/* Org-manager ("Admin" in the UI) only — the team page. A recruiter who reaches
+   the URL directly is sent to their dashboard. Distinct from AdminRoute, which
+   gates the separate platform-admin panel. Legacy accounts have no org_role and
+   are treated as managers of their own org. */
+function ManagerRoute({ children }) {
+  const { token, user, loading } = useAuth();
+  if (loading) return <FullScreenLoader />;
+  if (!token) return <Navigate to="/login" replace />;
+  if ((user?.org_role || "manager") !== "manager") return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -106,6 +119,7 @@ function AppRoutes() {
       <Route path="/jobs/:id/board" element={<PrivateRoute><CandidateBoard /></PrivateRoute>} />
       <Route path="/candidates/:id" element={<PrivateRoute><CandidateDetail /></PrivateRoute>} />
       <Route path="/reports" element={<PrivateRoute><Reports /></PrivateRoute>} />
+      <Route path="/team" element={<ManagerRoute><Team /></ManagerRoute>} />
       <Route path="/feedback" element={<PrivateRoute><Feedback /></PrivateRoute>} />
 
       <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />

@@ -43,6 +43,18 @@ export const authApi = {
   me: () => client.get("/auth/me"),
 };
 
+// ---- Organisation / team (Cycle 2) ----
+// Admins approve recruiter emails (single or bulk); approved users set their own
+// password on first sign-in. No invitation emails are sent in this release.
+export const orgsApi = {
+  me: () => client.get("/orgs/me"),
+  members: () => client.get("/orgs/members"),
+  addMember: (data) => client.post("/orgs/members", data),
+  addMembersBulk: (text) => client.post("/orgs/members/bulk", { text }),
+  setMemberStatus: (id, status) => client.patch(`/orgs/members/${id}`, { status }),
+  removeMember: (id) => client.delete(`/orgs/members/${id}`),
+};
+
 // ---- Jobs ----
 export const jobsApi = {
   list: () => client.get("/jobs"),

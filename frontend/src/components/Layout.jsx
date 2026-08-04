@@ -14,6 +14,9 @@ export function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
+  // Org manager ("Admin" in the UI). Legacy accounts have no org_role and are
+  // treated as managers of their own org. Recruiters ("User") don't see Team.
+  const isManager = (user?.org_role || "manager") === "manager";
 
   const handleLogout = () => {
     logout();
@@ -50,6 +53,11 @@ export function Sidebar() {
         <NavLink to="/reports" className={navItem} data-testid="nav-reports">
           <BarChart3 size={17} /> Reports
         </NavLink>
+        {isManager && (
+          <NavLink to="/team" className={navItem} data-testid="nav-team">
+            <Users size={17} /> Team
+          </NavLink>
+        )}
 
         <div className="text-[10px] uppercase tracking-wider text-white/25 px-5 py-2 mt-4">Support</div>
         <NavLink to="/feedback" className={navItem} data-testid="nav-feedback">

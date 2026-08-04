@@ -4,8 +4,40 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 10a reworked to approved-email onboarding (backend) complete → Phase 10b (frontend: Add-user/team UI + recruiter first-login) next, awaiting "continue".** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
-**Last updated:** 2026-08-04
+**Current phase:** 🔵 **Cycle 2 — Phase 10b (frontend: team management + recruiter first-login) written, ⚠️ NOT BUILT LOCALLY (no Node here) → owner must run `CI=true yarn build`; then Phase 11 (assignments) next.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Last updated:** 2026-08-05
+
+---
+
+## Session 22 — 2026-08-05 — Cycle 2 Phase 10b: team-management UI + recruiter first-login (frontend)
+
+**⚠️ Build status:** This environment has **no Node/npm/yarn**, so `CI=true yarn build` could **not** be run. Code was written to match existing patterns exactly and reviewed for unused-import / dangling-reference issues (CRA fails the build on warnings under `CI=true`), but it is **unverified by a real build**. **Owner action: run `CI=true yarn build` and report any errors** — I'll fix them. Owner chose this path explicitly.
+
+### The problem this fixes
+The approved-email backend (Session 21) let admins approve recruiter emails, but the **frontend blocked them from ever signing in**: `firebaseSignIn` enforced email verification on the client (unverified → signs out, returns `idToken: null`) and `Login.jsx` bailed before calling the backend. An approved recruiter (who just set a password, so `emailVerified=false`) could never reach `firebase_exchange` to be activated.
+
+### What changed (frontend)
+- **`lib/firebase.js`** — added **`firebaseSignInRaw`** (signs in and returns the ID token *regardless* of email-verified, so the **backend** decides) and **`firebaseResendAndSignOut`** (resend link + clear session for the unverified-manager case). The verification-enforcing `firebaseSignIn` is kept for the signup "resend" button.
+- **`pages/Login.jsx`** — now uses `firebaseSignInRaw` and **always exchanges with the backend**. Approved recruiters (unverified) get a session and land in the app; a public manager sign-up still gets `{verified:false}` → resend link + "verify your email" message. Legacy-password fallback and the Session-15 "server failure ≠ wrong password" rule preserved.
+- **`pages/Signup.jsx`** — softened the verify-screen copy: "If your admin already added you to a team, you can sign in now — no verification needed." (No logic change.)
+- **`api.js`** — added `orgsApi` (me, members, addMember, addMembersBulk, setMemberStatus, removeMember).
+- **`pages/Team.jsx`** (NEW) — manager-only team page: seat counter (`used / limit`), **Add-user modal** with "One at a time" (email + optional name) and "Paste a list" (bulk textarea → shows added/skipped-with-reasons summary), members table (Member, Role=Admin/User, Status=Active/Pending sign-in/Suspended, Jobs, Candidates, Last active), row actions (suspend/reactivate active/suspended members; remove a not-yet-signed-in approval to free a seat; "You" on own row). Loading skeleton, empty state, and a load-**error** state that says it's a server/connection problem, not user error.
+- **`App.js`** — added lazy `Team` + `/team` route behind a new **`ManagerRoute`** (org_role `manager`; recruiters/direct-URL → `/dashboard`). Distinct from `AdminRoute` (platform-admin panel).
+- **`components/Layout.jsx`** — added a **manager-only "Team"** sidebar link under Hiring.
+
+### Design/architecture adherence
+Frozen design system respected: reused `Button/Card/Modal/Avatar/Pill/EmptyState/Skeleton/Topbar/PageBody`, indigo/navy tokens, `sonner` toasts, `fmtDate`. No new deps, no new colours. "Admin"/"User" in copy, `manager`/`recruiter` in code. Lazy-loaded like every other post-dashboard page.
+
+### What was NOT verified (honesty)
+- **No `CI=true yarn build` run** (no Node here) — the single most important gap. Also no runtime click-through.
+- **No backend change** this session → backend suite unchanged (248 offline, still green from Session 21).
+- Recruiter journey depends on Firebase being configured in the live env; the legacy-password path only covers pre-Firebase/demo accounts (e.g. seeded Nadia/Tom, who sign in and correctly land as Users).
+- Frontend has **no automated tests** in this repo (never has); this UI is covered by manual QA only.
+
+### Owner action items
+1. **Run `CI=true yarn build`** in `frontend/` and paste any errors.
+2. Manual QA once built: admin → Team → add one email + bulk paste; approved user signs up then signs in (should land in app as a User, no verification wall); suspend/reactivate/remove; recruiter must NOT see the Team link or `/team`.
+3. Ensure Firebase is configured on the frontend env (it already is in prod) so recruiters can create passwords.
 
 ---
 
