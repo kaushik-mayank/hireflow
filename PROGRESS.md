@@ -4,8 +4,34 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 12 backend (assignments + JD overrides) complete → Phase 12 frontend (assign drawer + recruiter JD editor) next. ⚠️ Phase 10b frontend still needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Phase 12 frontend (assign panel + recruiter JD editor) written, ⚠️ NOT BUILT LOCALLY → owner must run `CI=true yarn build` (covers Sessions 22 + 24). Then Phase 13 (recruiter experience) next.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-05
+
+---
+
+## Session 24 — 2026-08-05 — Cycle 2 Phase 12 (frontend): assign panel + recruiter JD editor
+
+**⚠️ Build status:** No Node here, so `CI=true yarn build` was NOT run. Written to match existing patterns; checked for unused imports / dangling refs. **Owner: run `CI=true yarn build` — this now covers both Session 22 (team UI + login) and this session.**
+
+### What was built (frontend)
+- **`components/AssignmentPanel.jsx`** (NEW) — manager-only panel shown in a new **"Team" tab on the job page**. Lists assigned recruiters (avatar, permissions count, deadline/target pills, edit + remove). **Assign modal**: pick a teammate (recruiters from `orgsApi.members`), toggle the **8 permission flags** (recruiter defaults pre-checked), set the 3 **targets** (shortlist/sourced/interview), a **deadline** and a note. Edit re-opens the modal prefilled; remove confirms then revokes. Uses `assignmentsApi.upsert/revoke`.
+- **`pages/JobDetail.jsx`** — integrated the assign panel and the **recruiter personal-JD editor**:
+  - New **Team tab** (managers only — driven by `job.access_scope === "manager"`).
+  - In **JD Preview**, an assigned recruiter sees a **"Team version" / "Your version"** badge. With `can_edit_jd` they get **"Make my own version" / "Edit my version"** (opens a textarea modal → `assignmentsApi.setJdOverride` → reload) and, when personal, **"Reset to team version"** (`clearJdOverride`). The editor explains only they see it and their AI uses it.
+  - Drove tab list + permissions off the backend's `access_scope`, `jd_source`, `effective_permissions` (already returned by `GET /jobs/{id}`).
+  - Removed a **pre-existing unused `Sparkles` import** that would have failed `CI=true`.
+
+### Design/architecture adherence
+Reused `Modal/Card/Button/Avatar/Pill/Skeleton/EmptyState` and existing tokens/`sonner`; new panel is a self-contained component so JobDetail's working candidate/upload logic was untouched except for additive tabs/JD blocks. No new deps. "Admin/User" wording, `manager/recruiter` in code.
+
+### What was NOT verified (honesty)
+- **No `CI=true yarn build`** (no Node) and no runtime click-through — the main gap. Checked statically for unused imports (none in the new/edited files) and confirmed every new symbol is referenced.
+- **No backend change** this session (265 offline backend tests unchanged from Session 23).
+- Frontend has no automated tests in this repo (never has) — manual QA only.
+
+### Owner action items
+1. **Run `CI=true yarn build`** (covers Sessions 22 + 24) and paste any errors.
+2. QA once built: as a manager, open a job → **Team** tab → assign a recruiter with specific permissions/targets/deadline → edit → remove. As that recruiter (with `can_edit_jd`), open the job → **JD Preview** → make a personal version → confirm AI rank/screening uses it → reset. A recruiter **without** `can_edit_jd` sees no editor; a recruiter never sees the **Team** tab.
 
 ---
 

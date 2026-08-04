@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Upload, Sparkles, LayoutGrid, FileText, Activity, Search, Trash2, Eye, ArrowRight, CheckSquare } from "lucide-react";
-import { jobsApi, candidatesApi, aiApi, apiErr } from "@/api";
+import { ArrowLeft, Upload, LayoutGrid, FileText, Activity, Search, Trash2, Eye, ArrowRight, CheckSquare, Users } from "lucide-react";
+import { jobsApi, candidatesApi, aiApi, assignmentsApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
-import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Skeleton, EmptyState, Spinner, SourceBadge } from "@/components/ui";
+import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Skeleton, EmptyState, Spinner, SourceBadge, Modal } from "@/components/ui";
 import { STAGES, fmtDate } from "@/constants";
 import { CANDIDATE_SOURCES } from "@/config/sources";
+import AssignmentPanel from "@/components/AssignmentPanel";
 import { toast } from "sonner";
 
 // Accepted resume file types (kept in step with the backend allow-list).
@@ -25,6 +26,11 @@ export default function JobDetail() {
   const [dragOver, setDragOver] = useState(false);
   const [activity, setActivity] = useState([]);
   const [jdView, setJdView] = useState("original");
+  // Recruiter personal-JD editor (only shown when access_scope === "assigned"
+  // and the caller has can_edit_jd).
+  const [jdEdit, setJdEdit] = useState(false);
+  const [jdDraft, setJdDraft] = useState("");
+  const [savingJd, setSavingJd] = useState(false);
   const fileRef = useRef();
 
   // candidate filters
@@ -117,6 +123,34 @@ export default function JobDetail() {
 
   const toggleSel = (cid) => setSelected((s) => (s.includes(cid) ? s.filter((x) => x !== cid) : [...s, cid]));
 
+  const reloadJob = () => jobsApi.get(id).then((j) => setJob(j.data)).catch(() => {});
+
+  const openJdEditor = () => { setJdDraft(job?.jd_text || ""); setJdEdit(true); };
+
+  const saveJd = async () => {
+    setSavingJd(true);
+    try {
+      await assignmentsApi.setJdOverride(id, { jd_text: jdDraft });
+      toast.success("Saved your version of the job description");
+      await reloadJob();
+      setJdEdit(false);
+    } catch (err) {
+      toast.error(apiErr(err, "Couldn't save your version"));
+    } finally {
+      setSavingJd(false);
+    }
+  };
+
+  const resetJd = async () => {
+    try {
+      await assignmentsApi.clearJdOverride(id);
+      toast.success("Reverted to the team's version");
+      await reloadJob();
+    } catch (err) {
+      toast.error(apiErr(err, "Couldn't reset your version"));
+    }
+  };
+
   let view = cands.filter((c) => {
     const okSearch = (c.name || "").toLowerCase().includes(search.toLowerCase());
     const okStage = stageFilter === "all" || c.stage === stageFilter;
@@ -134,6 +168,20 @@ export default function JobDetail() {
   if (!job) return null;
 
   const jdText = jdView === "enhanced" && job.jd_enhanced ? job.jd_enhanced : job.jd_text;
+
+  // Manager sees the org job with a Team tab; a recruiter sees their assigned
+  // view and — with can_edit_jd — a personal JD editor. (Backend supplies
+  // access_scope, jd_source and effective_permissions on the job.)
+  const isManager = job.access_scope === "manager";
+  const isAssigned = job.access_scope === "assigned";
+  const canEditMyJd = isAssigned && Boolean(job.effective_permissions?.can_edit_jd);
+  const isPersonalJd = job.jd_source === "personal";
+  const tabs = [
+    ["candidates", "Candidates", null],
+    ["jd", "JD Preview", FileText],
+    ...(isManager ? [["team", "Team", Users]] : []),
+    ["activity", "Activity", Activity],
+  ];
 
   return (
     <Layout>
@@ -190,7 +238,7 @@ export default function JobDetail() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-gray-200 mb-4">
-          {[["candidates", "Candidates", null], ["jd", "JD Preview", FileText], ["activity", "Activity", Activity]].map(([k, label]) => (
+          {tabs.map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)} className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === k ? "border-indigo text-indigo" : "border-transparent text-gray-600 hover:text-gray-800"}`} data-testid={`tab-${k}`}>
               {label} {k === "candidates" && <span className="text-xs text-gray-400">({cands.length})</span>}
             </button>
@@ -274,6 +322,22 @@ export default function JobDetail() {
 
         {tab === "jd" && (
           <Card className="p-6">
+            {isAssigned && (
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <Pill tone={isPersonalJd ? "amber" : "gray"}>{isPersonalJd ? "Your version" : "Team version"}</Pill>
+                <span className="text-xs text-gray-500">
+                  {isPersonalJd ? "Your AI runs use this personal version." : "This is the shared job description."}
+                </span>
+                {canEditMyJd && (
+                  <Button variant="secondary" className="!py-1.5 ml-auto" onClick={openJdEditor} data-testid="jd-edit-open">
+                    {isPersonalJd ? "Edit my version" : "Make my own version"}
+                  </Button>
+                )}
+                {isPersonalJd && (
+                  <Button variant="ghost" className="!py-1.5" onClick={resetJd} data-testid="jd-reset">Reset to team version</Button>
+                )}
+              </div>
+            )}
             <div className="flex gap-2 mb-4">
               <button onClick={() => setJdView("original")} className={`text-sm px-3 py-1.5 rounded-lg ${jdView === "original" ? "bg-indigo text-white" : "bg-gray-100 text-gray-700"}`} data-testid="jd-original">Original</button>
               <button onClick={() => setJdView("enhanced")} disabled={!job.jd_enhanced} className={`text-sm px-3 py-1.5 rounded-lg disabled:opacity-40 ${jdView === "enhanced" ? "bg-indigo text-white" : "bg-gray-100 text-gray-700"}`} data-testid="jd-enhanced">Enhanced</button>
@@ -281,6 +345,8 @@ export default function JobDetail() {
             <pre className="whitespace-pre-wrap font-sans text-sm text-gray-700 leading-relaxed">{jdText || "No job description provided."}</pre>
           </Card>
         )}
+
+        {tab === "team" && isManager && <AssignmentPanel jobId={id} />}
 
         {tab === "activity" && (
           <Card className="p-2">
@@ -295,6 +361,30 @@ export default function JobDetail() {
             )) : <EmptyState icon={Activity} title="No activity yet" subtitle="Stage changes will appear here." />}
           </Card>
         )}
+
+        <Modal
+          open={jdEdit}
+          onClose={() => setJdEdit(false)}
+          title="Edit your version of the job description"
+          width="max-w-2xl"
+          footer={<>
+            <Button variant="secondary" onClick={() => setJdEdit(false)}>Cancel</Button>
+            <Button onClick={saveJd} disabled={savingJd} data-testid="jd-edit-save">{savingJd ? "Saving…" : "Save my version"}</Button>
+          </>}
+        >
+          <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+            Only you see this version, and your AI ranking and screening use it. The team's original job description
+            stays unchanged.
+          </p>
+          <textarea
+            value={jdDraft}
+            onChange={(e) => setJdDraft(e.target.value)}
+            rows={14}
+            className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-indigo focus:ring-2 focus:ring-indigo/20 font-sans leading-relaxed"
+            placeholder="Paste or write your version of the job description…"
+            data-testid="jd-edit-text"
+          />
+        </Modal>
       </PageBody>
     </Layout>
   );
