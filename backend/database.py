@@ -19,6 +19,14 @@ ai_usage_log = db.ai_usage_log
 login_activity = db.login_activity
 feedback = db.feedback
 
+# Cycle 2 — organisations, invitations, assignments, per-recruiter JD overrides,
+# and an append-only activity log powering manager KPIs. All additive.
+organizations = db.organizations
+invitations = db.invitations
+job_assignments = db.job_assignments
+job_jd_overrides = db.job_jd_overrides
+activity_events = db.activity_events
+
 # Upload directory
 UPLOAD_DIR = ROOT_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -60,3 +68,33 @@ async def ensure_indexes() -> None:
     await feedback.create_index([("created_at", -1)])
     await feedback.create_index([("user_id", 1), ("created_at", -1)])
     await feedback.create_index("status")
+
+    # --- Cycle 2 (all additive; create_index is idempotent) ---
+    await users.create_index([("org_id", 1), ("status", 1)])
+
+    await organizations.create_index("id")
+    await organizations.create_index("owner_user_id")
+
+    await invitations.create_index("token_hash")
+    await invitations.create_index([("org_id", 1), ("status", 1)])
+    # At most one PENDING invite per (org, email); accepted/revoked don't collide.
+    await invitations.create_index(
+        [("org_id", 1), ("email", 1)],
+        unique=True,
+        partialFilterExpression={"status": "pending"},
+        name="uniq_pending_invite_per_org_email",
+    )
+
+    await jobs.create_index([("org_id", 1), ("status", 1), ("created_at", -1)])
+    await jobs.create_index([("org_id", 1), ("created_by", 1)])
+
+    await job_assignments.create_index([("org_id", 1), ("user_id", 1), ("status", 1)])
+    await job_assignments.create_index("job_id")
+    await job_assignments.create_index([("job_id", 1), ("user_id", 1)], unique=True)
+
+    await job_jd_overrides.create_index([("job_id", 1), ("user_id", 1)], unique=True)
+
+    await candidates.create_index([("org_id", 1), ("sourced_by", 1), ("stage", 1)])
+
+    await activity_events.create_index([("org_id", 1), ("created_at", -1)])
+    await activity_events.create_index([("actor_id", 1), ("created_at", -1)])
