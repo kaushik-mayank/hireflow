@@ -4,8 +4,46 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 9b (org-scope every backend query) complete → Phase 10 next, awaiting "continue".** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Phase 10a (invitation & first-login auth — backend) complete → Phase 10b (frontend `/accept-invite` + invite hooks) next, awaiting "continue".** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-04
+
+---
+
+## Session 20 — 2026-08-04 — Cycle 2 Phase 10a: invitation & first-login auth (backend)
+
+**Scope split:** Phase 10 bundles backend auth + the `/accept-invite` page. The frontend can't be built here (no Node/npm locally), so this session did the **backend** (10a); the React page + `/team` invite hooks are **10b**. Backend-before-frontend, as the plan directs.
+
+### What was built
+- **`invites.py`** (NEW — pure core): 32-byte URL-safe token, **sha256-only storage** (`generate_token`/`hash_token`), `invite_reason` (valid/expired/revoked/accepted/unknown, with accepted>expired precedence), `expiry_from` (+7d), and rate-limit predicate/constants (`INVITES_PER_HOUR=20`, `ACCEPT_ATTEMPTS_PER_HOUR=10`). No FastAPI/Mongo — fully unit-tested.
+- **`routes_orgs.py`** (NEW): manager router `/orgs` + public `/invites`.
+  - `POST /orgs/invites` — seat-limit + rate-limit + duplicate-email guards; creates an `invited` placeholder member (reserves a seat) + a `pending` invitation; emails the link; returns `accept_url` **once** for the copy-link fallback + `email_sent`. Compensating delete if the invitation insert fails.
+  - `GET /orgs/invites` (pending), `POST /orgs/invites/{id}/resend` (**rotates the token** so old links die; rate-limited), `DELETE /orgs/invites/{id}` (revoke + free the seat; 409 if already accepted).
+  - `GET /orgs/members`, `PATCH /orgs/members/{id}` (suspend/reactivate; can't suspend self; org must keep ≥1 active admin; cross-org→404), `GET /orgs/me` (org name, plan, seats used/limit, my role).
+  - `GET /invites/{token}` (public) — neutral validate: only a genuinely valid token returns the invitee's own email + org name; anything else is `{valid:false, reason}` with no PII.
+- **`routes_auth.py`** — `POST /auth/accept-invite`: validates token state → per-token accept-attempt throttle → verifies Firebase token → **asserts token email == invite email** → activates the member (`firebase_uid`, `status=active`, `activated_at`) → marks invite accepted → mints the app JWT. **Email verification is bypassed only on this path** (holding the emailed token is the proof), never as a global flag.
+- **`auth.py`** — `get_current_user` now rejects `status="disabled"` with **401 "Your access has been suspended."** on *every* request, so a suspend takes effect on the live session, not just at next login.
+- **`email_service.py`** — `build_invite_email` (plain-text, single CTA + copy-paste fallback line). Uses the existing SMTP-optional `send_email` (returns False, never raises, when SMTP is unset).
+- **`models.py`** — `InviteCreate`, `AcceptInviteRequest`, `MemberStatusUpdate`.
+- **`server.py`** — registered `routes_orgs.router` + `routes_orgs.public_router`.
+
+### Tests (all offline; forwards AND reverse green)
+- **`tests/test_invites.py`** (12): token uniqueness/hash/expiry, every `invite_reason` state incl. precedence, rate-limit boundary.
+- **`tests/test_org_and_auth.py`** (26): create/list/resend/revoke, seat limit, duplicate/other-org guards, APP_URL-missing 503, public validate (valid/expired-neutral/unknown), accept happy path + wrong-email/expired-410/already-accepted-409/firebase-503/bad-token-401, suspend member + can't-suspend-self + last-admin guard + cross-org 404, `org_me` seats, and the **real** `get_current_user` suspension gate (401 suspended / 403 platform-deactivated / active passes). Imports the real `auth` against stubbed `jwt`/`bcrypt`.
+- Fixed two offline `_APIRouter` stubs to add `.patch` (routes_orgs uses PATCH) so cross-module import order stays green.
+- **252 offline tests pass forwards AND reverse** (214 → 252). All changed files `py_compile` clean.
+
+### What was NOT verified (honesty)
+- **Nothing run against Mongo, real Firebase, or SMTP.** Token/seat/accept logic is unit + stub-route tested only. The unique partial index on `(org_id,email)` pending invites, the compensating-delete race path, and real email delivery are **unexercised live** — dry-run + a real invite must be exercised in the Phase 15 runbook.
+- **No frontend** this session → no `yarn build`. `/accept-invite`, the Add-user modal, invite/seat UI, and suspend/reactivate controls are **Phase 10b/11**. Until then invites can be created via API but there's no page to accept them in the product.
+- Member **remove-with-reassignment** (DELETE `/orgs/members/{id}`) is deliberately deferred to Phase 11 (needs the reassignment UI); only suspend/reactivate ships now.
+
+### Owner action items
+- **New backend env var `APP_URL`** (e.g. `https://hireflow.cortinix.com`) is now **required to send invites** — `POST /orgs/invites` returns a 503 with that message until it's set. Add it before Phase 10b ships.
+- SMTP must be configured for invite emails to actually send; without it invites still create and the manager gets a **Copy invite link** value (`accept_url`) to share manually.
+
+### Backlog / Not in scope (logged)
+- `/login` returns 403 "deactivated" while `get_current_user` returns 401 "suspended" for a disabled user — both block; unify copy in a later cleanup.
+- (Carried) `is_active` int vs `status` string coexist (C3); pre-Cycle-2 `stage_transitions` rows have no `actor_id`; `_get_owned_candidate` legacy name in routes_ai.
 
 ---
 

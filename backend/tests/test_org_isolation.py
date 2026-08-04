@@ -97,7 +97,7 @@ class _APIRouter:
     def _decorator(self, *a, **k):
         return lambda fn: fn
 
-    get = post = put = delete = _decorator
+    get = post = put = patch = delete = _decorator
 
 
 # ---------------------------------------------------------------------------

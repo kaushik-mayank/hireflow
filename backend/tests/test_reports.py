@@ -33,7 +33,7 @@ def rp():
         def _decorator(self, *args, **kwargs):
             return lambda fn: fn
 
-        get = post = put = delete = _decorator
+        get = post = put = patch = delete = _decorator
 
     # Merge into any stub another test module already installed rather than
     # skipping when the name exists — otherwise whichever suite runs first
