@@ -132,6 +132,7 @@ def world():
     colls = {
         "jobs": FakeColl(),
         "candidates": FakeColl(),
+        "users": FakeColl(),
         "job_assignments": FakeColl(),
         "job_jd_overrides": FakeColl(),
         "stage_transitions": FakeColl(),
@@ -347,3 +348,20 @@ def test_reports_manager_scoped_to_own_org(world):
     out = run(world.rep_r.reports(MANAGER_A))
     assert out["totals"]["jobs"] == 1
     assert out["totals"]["candidates"] == 1  # org-B's candidate excluded
+
+
+def test_team_report_manager_scoped_to_org(world):
+    _reset(world, jobs=[JOB_A], candidates=[CAND_A])
+    world.colls["users"].docs = [
+        {"id": "rec-A", "org_id": "org-A", "org_role": "recruiter", "name": "Rec A", "email": "r@a.com"},
+        {"id": "rec-B", "org_id": "org-B", "org_role": "recruiter", "name": "Rec B", "email": "r@b.com"},
+    ]
+    out = run(world.rep_r.team_report(MANAGER_A))
+    assert {r["user_id"] for r in out["throughput"]} == {"rec-A"}  # org-B recruiter excluded
+    assert out["totals"]["recruiters"] == 1
+
+
+def test_team_report_is_manager_only(world):
+    with pytest.raises(world.exc) as e:
+        run(world.p.require_manager(RECRUITER_A))
+    assert e.value.status_code == 403

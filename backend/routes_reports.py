@@ -20,8 +20,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 
-from database import jobs, candidates, stage_transitions
+from database import jobs, candidates, stage_transitions, users, job_assignments
 import permissions
+import team_reports as tr
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -477,5 +478,80 @@ async def reports(user: dict = Depends(permissions.require_org_member)) -> dict:
             "candidates": len(all_cands),
             "hired": sum(1 for c in all_cands if c.get("stage") == HIRED_STAGE),
             "unanalyzed": unanalyzed,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Manager team report (Phase 14) — per-recruiter throughput, target attainment,
+# deadline health and workload. Manager-only and org-scoped; the heavy lifting
+# lives in the pure `team_reports` module so it is fully unit-tested.
+# ---------------------------------------------------------------------------
+
+@router.get("/team")
+async def team_report(user: dict = Depends(permissions.require_manager)) -> dict:
+    org_id = user["org_id"]
+    now = datetime.now(timezone.utc)
+
+    members = await users.find(
+        {"org_id": org_id, "org_role": "recruiter"},
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "status": 1, "last_login_at": 1},
+    ).to_list(1000)
+    recruiter_ids = [m["id"] for m in members]
+    member_by_id = {m["id"]: m for m in members}
+
+    assignments = await job_assignments.find(
+        {"org_id": org_id, "status": {"$in": ["active", "paused"]}}, {"_id": 0}
+    ).to_list(5000)
+    org_jobs = await jobs.find({"org_id": org_id}, {"_id": 0, "id": 1, "title": 1, "status": 1}).to_list(2000)
+    title_by_job = {j["id"]: j for j in org_jobs}
+
+    cands = await candidates.find(
+        {"org_id": org_id}, {"_id": 0, "id": 1, "job_id": 1, "sourced_by": 1, "stage": 1, "uploaded_at": 1}
+    ).to_list(50000)
+    cand_ids = [c["id"] for c in cands]
+    transitions = await stage_transitions.find(
+        {"candidate_id": {"$in": cand_ids}}, {"_id": 0}
+    ).to_list(200000)
+    transitions_by_cand = defaultdict(list)
+    for t in transitions:
+        transitions_by_cand[t["candidate_id"]].append(t)
+
+    throughput = tr.throughput_by_recruiter(recruiter_ids, cands, transitions_by_cand)
+    attainment = tr.target_attainment(assignments, cands, transitions_by_cand, now)
+    deadlines = tr.deadline_health(assignments, now)
+    workload = tr.workload_balance(recruiter_ids, assignments, cands)
+    ins = tr.insights(throughput, attainment, deadlines, now)
+
+    def with_user(row):
+        m = member_by_id.get(row["user_id"]) or {}
+        row["user_name"] = m.get("name")
+        row["user_email"] = m.get("email")
+        return row
+
+    def with_job(row):
+        row["job_title"] = (title_by_job.get(row.get("job_id")) or {}).get("title")
+        return row
+
+    for r in throughput:
+        with_user(r)
+    for r in workload:
+        with_user(r)
+    for r in attainment:
+        with_user(with_job(r))
+    for r in deadlines:
+        with_user(with_job(r))
+
+    return {
+        "throughput": throughput,
+        "target_attainment": attainment,
+        "deadline_health": deadlines,
+        "workload": workload,
+        "insights": ins,
+        "totals": {
+            "recruiters": len(members),
+            "assignments": len(assignments),
+            "candidates": len(cands),
+            "hires": sum(r["hired"] for r in throughput),
         },
     }

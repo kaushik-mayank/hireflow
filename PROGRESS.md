@@ -4,8 +4,36 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 12 frontend (assign panel + recruiter JD editor) written, ⚠️ NOT BUILT LOCALLY → owner must run `CI=true yarn build` (covers Sessions 22 + 24). Then Phase 13 (recruiter experience) next.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Phase 14a backend (manager team-report API) complete. ⚠️ Frontend Sessions 22 + 24 still need an owner `CI=true yarn build`. Next: Phase 14 remaining panels/CSV + Phases 13/14 frontend.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-05
+
+---
+
+## Session 25 — 2026-08-05 — Cycle 2 Phase 14a (backend): manager team-report API
+
+**Why this, not Phase 13:** three frontend batches are already stacked awaiting an owner build; adding a fourth (Phase 13 is almost entirely recruiter-UX frontend) would pile on unverifiable code. Phase 14's *backend* is independent and fully offline-testable, so it was pulled forward. Phase 13 + the Phase 14 charts will be built together once the build loop is available.
+
+### What was built (backend only — fully offline-tested)
+- **`team_reports.py`** (NEW — pure, no DB/network): the per-recruiter manager panels, with the KPI formulas written into the code and the Cycle-1 honesty discipline (rates withheld below a 5-item sample; a null target hides its panel, never shows 0):
+  - `throughput_by_recruiter` — sourced / shortlisted / interviewed / hired per recruiter, using **furthest-stage-reached** (a now-Rejected candidate who reached Interview still counts), with shortlist/hire rates gated on sample ≥ 5.
+  - `target_attainment` — actual-vs-target per assignment for each **set** target, with a **burn-down status** (met / on_track / at_risk / missed / no_deadline) comparing pace-achieved to pace-required against the deadline (§8.3).
+  - `deadline_health` — assignments with a deadline, most-overdue first, no-deadline excluded.
+  - `workload_balance` — open assignments + live candidate load per recruiter (idle recruiters shown, hired/rejected excluded).
+  - `insights` — deterministic rule-based lines (overdue, at-risk, hires, idle recruiters).
+- **`routes_reports.py`** — `GET /reports/team` (manager-only, org-scoped): fetches org recruiters / active assignments / candidates / transitions, runs the pure panels, enriches rows with member names + job titles, returns `{throughput, target_attainment, deadline_health, workload, insights, totals}`. The existing `GET /reports` (role-scoped personal/org report) is unchanged.
+
+### Tests (offline; forwards AND reverse green)
+- **`tests/test_team_reports.py`** (NEW, 18): each metric has the mandated **zero-data / single-item / divide-by-zero / naive-vs-aware-timestamp / candidate-predating-the-field** cases, plus on_track-vs-at_risk burn-down, overdue ordering, and rate-suppression at the sample floor.
+- **`tests/test_org_isolation.py`** +2: `/reports/team` manager-scoped to its own org, and manager-only (recruiter → 403). Added `users` to that suite's + `test_reports.py`'s DB stubs (routes_reports now imports `users`/`job_assignments`).
+- **285 offline tests pass forwards AND reverse** (265 → 285). All changed backend files `py_compile` clean.
+
+### What was NOT verified (honesty)
+- **Nothing against real Mongo.** Panels are pure-function + endpoint-reasoned; the aggregation over real transition volumes is untested for performance (N+1 is avoided — one transitions query, then in-memory grouping).
+- **Deferred (Phase 14b):** funnel-by-recruiter, time-metrics per recruiter, source-effectiveness-by-recruiter, AI-usage-by-recruiter, `GET /reports/team/export.csv` (stdlib `csv`), `GET /reports/mine` (the current `/reports` already serves a recruiter's own view), and **all recharts frontend**.
+- **Frontend Sessions 22 + 24 still unbuilt** — owner `CI=true yarn build` outstanding.
+
+### Owner action items (carried)
+1. **Run `CI=true yarn build`** (covers Sessions 22 + 24) and paste any errors.
 
 ---
 

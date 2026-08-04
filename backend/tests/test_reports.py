@@ -56,7 +56,7 @@ def rp():
     # routes_reports now imports the permissions spine, which imports these extra
     # collections from `database` — stub them too so the import resolves offline.
     stub("database", jobs=None, candidates=None, stage_transitions=None,
-         job_assignments=None, job_jd_overrides=None)
+         job_assignments=None, job_jd_overrides=None, users=None)
     stub("auth", get_current_user=None)
 
     import routes_reports
