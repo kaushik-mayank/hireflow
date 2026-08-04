@@ -49,7 +49,8 @@ def env():
 
     _merge_stub("fastapi", HTTPException=_HTTPException, Depends=lambda dep=None: None)
 
-    fake = {"jobs": FakeColl(), "job_assignments": FakeColl(), "job_jd_overrides": FakeColl()}
+    fake = {"jobs": FakeColl(), "job_assignments": FakeColl(),
+            "job_jd_overrides": FakeColl(), "candidates": FakeColl()}
     _merge_stub("database", **fake)
     _merge_stub("auth", get_current_user=lambda: None)
 
@@ -58,6 +59,7 @@ def env():
     permissions.jobs = fake["jobs"]
     permissions.job_assignments = fake["job_assignments"]
     permissions.job_jd_overrides = fake["job_jd_overrides"]
+    permissions.candidates = fake["candidates"]
 
     return types.SimpleNamespace(
         p=permissions,

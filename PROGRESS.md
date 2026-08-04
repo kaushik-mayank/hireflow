@@ -4,8 +4,38 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 9a (data foundation) complete → Phase 9b (apply org-scoping across all queries) is next, awaiting "continue".** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Phase 9b (org-scope every backend query) complete → Phase 10 next, awaiting "continue".** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-04
+
+---
+
+## Session 19 — 2026-08-04 — Cycle 2 Phase 9b: org+assignment scoping across every route
+
+**Goal:** replace the last `user_id`-scoped reads with the org+assignment spine so cross-org data is unreachable. Backend-only; no frontend change (org UI is Phases 11/13).
+
+### What changed (all through `permissions.py`, backend before frontend)
+- **`routes_jobs.py`** — `list_jobs` → `require_org_member` + `accessible_job_ids` (manager = all org jobs, recruiter = active assignments only). `create_job` → `require_manager` (recruiters can't create; personal jobs are Cycle 3). `get_job`/`update_job`/`delete_job`/`activity` → `resolve_job_access`; edit/delete manager-only (403 for recruiter); delete cascades `job_assignments` + `job_jd_overrides`. `get_job` returns `effective_permissions`/`jd_source`/`access_scope`.
+- **`routes_candidates.py`** — upload/list/detail/stage/note/delete/bulk all go through `resolve_job_access` / `resolve_candidate_access` + `candidate_scope_filter` (recruiter without `can_view_team_candidates` sees only their `sourced_by` rows). Uploads stamp `org_id`/`sourced_by`/`assignment_id` and write `activity_events`; stage moves log actor + event. `bulk-stage` org-scopes first, then resolves access once per job (cached) and drops rows the caller can't see.
+- **`routes_ai.py`** — `rank` + all candidate AI tools (`questions`/`email`/`summary`/`structure`/`compare`) go through `resolve_job_access`/`resolve_candidate_access`, use `resolve_jd` (so a recruiter's **personal JD override** drives their AI), enforce **`can_use_ai`**, and stamp `org_id` on usage. `analyzed_jd_source` recorded on each rank so results stay explainable. `compare` now rejects cross-job pairs. `pipeline-health` org/role-scoped.
+- **`routes_dashboard.py`** & **`routes_reports.py`** — role-scoped: manager → whole org; recruiter → assigned jobs + their sourced candidates (empty-state short-circuit when a recruiter has no assignments). Reports analytics stayed pure functions — only the two feeder queries changed.
+- **`ai_service.py`** — `log_usage` gained `org_id` (C6): AI spend is now attributable per org.
+
+### Enforcement invariant (now true)
+Every job/candidate/AI/report route fetches by id **only** through `resolve_job_access` / `resolve_candidate_access`. Cross-org and no-assignment reads return **404** (never confirm another org's data). `routes_admin.py` (platform-admin, purple) is deliberately untouched.
+
+### Tests
+- **`tests/test_org_isolation.py`** (NEW, 14): route-level proofs that the routes actually call the spine — cross-org `get_job`/`get_candidate`/`rank` → 404; recruiter can't see another recruiter's candidate (404) or create a job (403); `can_use_ai=False` → 403 with a human message; dashboard/reports scoped to own org, recruiter-without-assignment empty. Offline stub-merge; imports the **real** `ai_service`/`resume_parser` (patches only the network fns) so it never shadows other suites.
+- Fixed two pre-existing offline stubs broken by 9b's new imports: `test_permissions.py` (permissions now imports `candidates`) and `test_reports.py` (routes_reports now imports `permissions`, needs `job_assignments`/`job_jd_overrides` + a real `HTTPException` class in its `fastapi` stub).
+- **214 offline tests pass forwards AND reverse** (200 → 214). All changed files `py_compile` clean.
+
+### What was NOT verified (honesty)
+- **Nothing run against a real DB or live server.** Enforcement is proven by unit + route-level stub tests, not integration. The two live-server suites (`backend_test.py`, `test_admin_reports.py`) still require a running backend and are excluded from the offline run.
+- No frontend touched → no `yarn build` this session. The frontend still ignores `org_role`/`effective_permissions`/`access_scope`; wiring the recruiter UI + permission gates is Phases 11/13.
+- Dashboard/reports apply the recruiter `sourced_by` filter uniformly (conservative — never over-shows). A recruiter holding `can_view_team_candidates` on a job still sees only their own in the aggregate dashboard; per-job candidate lists honour the flag correctly. Acceptable for Cycle 2; revisit if team-level recruiter dashboards are wanted.
+
+### Backlog / Not in scope (logged)
+- `_get_owned_candidate` in `routes_ai.py` kept its name but now returns `(cand, access, jd)` — fine, but the name is legacy; rename in a later cleanup.
+- (Carried) `is_active` int vs `status` string coexist (C3); pre-Cycle-2 `stage_transitions` rows have no `actor_id`.
 
 ---
 

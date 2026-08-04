@@ -45,8 +45,18 @@ def rp():
                 setattr(module, key, value)
         sys.modules[name] = module
 
-    stub("fastapi", APIRouter=_APIRouter, Depends=lambda dependency=None: None)
-    stub("database", jobs=None, candidates=None, stage_transitions=None)
+    class _HTTPException(Exception):
+        def __init__(self, status_code=None, detail=None):
+            self.status_code = status_code
+            self.detail = detail
+            super().__init__(detail)
+
+    stub("fastapi", APIRouter=_APIRouter, Depends=lambda dependency=None: None,
+         HTTPException=_HTTPException)
+    # routes_reports now imports the permissions spine, which imports these extra
+    # collections from `database` — stub them too so the import resolves offline.
+    stub("database", jobs=None, candidates=None, stage_transitions=None,
+         job_assignments=None, job_jd_overrides=None)
     stub("auth", get_current_user=None)
 
     import routes_reports
