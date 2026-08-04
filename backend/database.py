@@ -22,6 +22,8 @@ feedback = db.feedback
 # Cycle 2 — organisations, invitations, assignments, per-recruiter JD overrides,
 # and an append-only activity log powering manager KPIs. All additive.
 organizations = db.organizations
+# `invitations` is reserved for a future emailed-invite / plan-purchase cycle and
+# is not written by the current approved-email onboarding flow (see routes_orgs).
 invitations = db.invitations
 job_assignments = db.job_assignments
 job_jd_overrides = db.job_jd_overrides

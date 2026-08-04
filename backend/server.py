@@ -133,7 +133,6 @@ async def api_root() -> dict:
 
 api_router.include_router(routes_auth.router)
 api_router.include_router(routes_orgs.router)
-api_router.include_router(routes_orgs.public_router)
 api_router.include_router(routes_jobs.router)
 api_router.include_router(routes_candidates.router)
 api_router.include_router(routes_ai.router)

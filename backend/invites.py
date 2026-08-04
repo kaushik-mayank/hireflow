@@ -1,5 +1,12 @@
 """Recruiter-invitation tokens and state — the pure, side-effect-free core.
 
+DORMANT IN THIS RELEASE. The current onboarding flow does not email invitations:
+admins store approved recruiter emails and each recruiter sets their own password
+on first sign-in (see routes_orgs.py / routes_auth.firebase_exchange). This module
+and the `invitations` collection are kept, tested and ready for a future cycle
+where admins purchase plans and formal emailed invites return. Nothing in the
+live request path imports it today.
+
 Kept separate from the routes so the security-sensitive bits (token generation,
 hashing, expiry/validity, rate-limit thresholds) are unit-testable offline with
 no FastAPI, Mongo or SMTP in the picture.

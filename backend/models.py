@@ -25,19 +25,26 @@ class FirebaseAuthRequest(BaseModel):
     company: Optional[str] = None
 
 
-# ---------- Organisation / invites (Cycle 2) ----------
-class InviteCreate(BaseModel):
-    """Manager invites a recruiter. No role field — invited users are always
-    recruiters; managers arrive only through public sign-up."""
+# ---------- Organisation / members (Cycle 2) ----------
+#
+# NOTE: This release does NOT send invitation emails. An admin ("Manager")
+# stores approved recruiter emails (typed one at a time or pasted/bulk-uploaded);
+# only those emails may join the org, and each approved user sets their own
+# password the first time they sign in. The emailed-token invite machinery
+# (invites.py, the `invitations` collection) is kept dormant for a future cycle
+# where admins purchase plans and formal invites return.
+class MemberCreate(BaseModel):
+    """Admin approves a single recruiter email. No role field — approved users
+    are always recruiters; admins arrive only through public sign-up."""
     email: EmailStr
     name: Optional[str] = None
 
 
-class AcceptInviteRequest(BaseModel):
-    """Recruiter completes onboarding: the invite token plus the Firebase ID
-    token proving they now hold credentials for that email."""
-    token: str
-    firebase_id_token: str
+class BulkMemberCreate(BaseModel):
+    """Admin approves many recruiter emails at once. `text` is whatever they
+    typed or pasted (or a CSV's contents) — the server splits it on commas,
+    semicolons, whitespace and newlines, then validates and de-duplicates."""
+    text: str
 
 
 class MemberStatusUpdate(BaseModel):
