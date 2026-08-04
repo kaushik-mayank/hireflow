@@ -102,6 +102,18 @@ def test_is_manager(env):
     assert env.p.is_manager({}) is False
 
 
+def test_sanitize_permissions_keeps_known_flags_only(env):
+    p = env.p
+    raw = {"can_edit_jd": 1, "can_use_ai": 0, "made_up_flag": True, "can_close_job": "yes"}
+    out = p.sanitize_permissions(raw)
+    # Unknown keys dropped; known keys coerced to bool.
+    assert out == {"can_edit_jd": True, "can_use_ai": False, "can_close_job": True}
+    assert "made_up_flag" not in out
+    # Non-dict input is safe.
+    assert p.sanitize_permissions(None) == {}
+    assert p.sanitize_permissions("nope") == {}
+
+
 # --------------------------------------------------------------------------
 # resolve_job_access
 # --------------------------------------------------------------------------

@@ -4,8 +4,39 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Phase 10b (frontend: team management + recruiter first-login) written, ⚠️ NOT BUILT LOCALLY (no Node here) → owner must run `CI=true yarn build`; then Phase 11 (assignments) next.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Phase 12 backend (assignments + JD overrides) complete → Phase 12 frontend (assign drawer + recruiter JD editor) next. ⚠️ Phase 10b frontend still needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-05
+
+---
+
+## Session 23 — 2026-08-05 — Cycle 2 Phase 12 (backend): assignment API + personal JD overrides
+
+**Context:** The permission spine + enforcement across jobs/candidates/AI/reports already exists (Phase 9). What was missing was any way to *create* assignments or a recruiter's personal JD. This session adds that API. (Most of Phase 11's team UI was already delivered in 10b; the remaining Phase 11 bit — remove-with-*reassignment* of an active member — is still deferred and now has the assignment API it needs.)
+
+### What was built (backend only — fully offline-tested)
+- **`permissions.py`** — `sanitize_permissions(raw)`: keep only the 8 known flags, coerce to bool, drop anything a client invents. Used when saving an assignment so permissions can never be widened by an unexpected key.
+- **`routes_assignments.py`** (NEW) — two routers:
+  - `POST /jobs/{id}/assignments` (manager) — **idempotent upsert** on (job, user): merges `DEFAULT_PERMISSIONS` + sanitized flags, stores targets (shortlist/sourced/interview), deadline, note, status; writes a `job_assigned` activity event. Guards: job in org (404), member in org (404), can't assign an Admin (400), can't assign a disabled member (400).
+  - `GET /jobs/{id}/assignments` (manager) — active/paused assignments, enriched with each member's name/email/status.
+  - `DELETE /jobs/{id}/assignments/{userId}` (manager) — soft-revoke (`status=revoked`) so the recruiter loses access via the existing spine; drops their personal JD override for that job (candidates they sourced are preserved, §4.3). 404 if none.
+  - `GET /assignments/mine` (recruiter) — their active assignments with job basics + permissions/targets/deadline; empty for a manager.
+  - `PUT /jobs/{id}/jd-override` (recruiter, **needs `can_edit_jd`**) — upserts `job_jd_overrides`; 403 without the flag, 400 if a manager tries (admins edit the shared JD directly), 404 cross-org. `DELETE` reverts to the org JD.
+- **`server.py`** — registered both routers (before `routes_jobs`; paths are distinct so no shadowing).
+- **`models.py`** — `AssignmentUpsert`, `JDOverrideUpdate`.
+- **`frontend/src/api.js`** — `assignmentsApi` (listForJob, upsert, revoke, mine, setJdOverride, clearJdOverride). Client stubs only; no UI yet.
+
+### Tests (offline; forwards AND reverse green)
+- **`tests/test_assignments.py`** (NEW, 16): create-with-merged-perms (+ unknown-flag dropped), idempotent upsert, cross-org job 404, unknown/manager/disabled member guards, list enrichment, revoke (status + override drop) + 404, `mine` for recruiter vs empty-for-manager, JD override needs-permission 403 / saves-personal / manager-400 / cross-org-404 / clear-reverts.
+- **`tests/test_permissions.py`** +1: `sanitize_permissions`.
+- **265 offline tests pass forwards AND reverse** (248 → 265). All changed backend files `py_compile` clean.
+
+### What was NOT verified (honesty)
+- **Nothing against real Mongo.** Upsert/permission-merge/override logic is unit + stub-route tested only. The `(job_id,user_id)` unique index and the soft-revoke→re-upsert reactivation path are unexercised live.
+- **No frontend UI** for assignments yet — only the `assignmentsApi` client methods were added (untested, but trivial axios wrappers). The assign drawer (permission toggles, targets, deadline, bulk assign) and the recruiter's JD-override editor are Phase 12 frontend.
+- **Phase 10b frontend remains unbuilt here** — still needs the owner's `CI=true yarn build`.
+
+### Owner action items (carried)
+1. Still pending: `CI=true yarn build` for the Session 22 frontend (team UI + login), report errors.
 
 ---
 

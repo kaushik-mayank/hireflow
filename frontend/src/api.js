@@ -55,6 +55,16 @@ export const orgsApi = {
   removeMember: (id) => client.delete(`/orgs/members/${id}`),
 };
 
+// ---- Assignments & personal JD override (Cycle 2) ----
+export const assignmentsApi = {
+  listForJob: (jobId) => client.get(`/jobs/${jobId}/assignments`),
+  upsert: (jobId, data) => client.post(`/jobs/${jobId}/assignments`, data),
+  revoke: (jobId, userId) => client.delete(`/jobs/${jobId}/assignments/${userId}`),
+  mine: () => client.get("/assignments/mine"),
+  setJdOverride: (jobId, data) => client.put(`/jobs/${jobId}/jd-override`, data),
+  clearJdOverride: (jobId) => client.delete(`/jobs/${jobId}/jd-override`),
+};
+
 // ---- Jobs ----
 export const jobsApi = {
   list: () => client.get("/jobs"),

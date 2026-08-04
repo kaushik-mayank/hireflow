@@ -51,6 +51,28 @@ class MemberStatusUpdate(BaseModel):
     status: str  # "active" (reactivate) | "disabled" (suspend)
 
 
+class AssignmentUpsert(BaseModel):
+    """A manager assigns a job to a recruiter with per-assignment permissions,
+    targets and a deadline. Idempotent on (job, user): sending it again edits the
+    existing assignment. `permissions` is a subset of the 8 flags — unknown keys
+    are ignored server-side; omitted flags fall back to the recruiter defaults."""
+    user_id: str
+    permissions: Optional[dict] = None
+    shortlist_target: Optional[int] = None
+    sourced_target: Optional[int] = None
+    interview_target: Optional[int] = None
+    deadline: Optional[str] = None
+    note: Optional[str] = None
+    status: Optional[str] = None  # "active" | "paused"
+
+
+class JDOverrideUpdate(BaseModel):
+    """A recruiter's personal job-description override (needs can_edit_jd). Never
+    written back to the shared job — only this recruiter sees/uses it."""
+    jd_text: str
+    jd_enhanced: Optional[str] = None
+
+
 # ---------- Jobs ----------
 class JobCreate(BaseModel):
     title: str

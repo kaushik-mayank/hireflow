@@ -41,6 +41,16 @@ DEFAULT_PERMISSIONS = {
 PERMISSION_FLAGS = tuple(DEFAULT_PERMISSIONS.keys())
 MANAGER_PERMISSIONS = {flag: True for flag in DEFAULT_PERMISSIONS}
 
+
+def sanitize_permissions(raw) -> dict:
+    """Keep only the known permission flags from caller-supplied input, coerced
+    to bool. Unknown keys are dropped so a client can never invent a flag, and
+    the result is safe to merge onto DEFAULT_PERMISSIONS when saving an
+    assignment."""
+    if not isinstance(raw, dict):
+        return {}
+    return {flag: bool(raw[flag]) for flag in PERMISSION_FLAGS if flag in raw}
+
 # Human sentences for denied permissions (never surface a flag name to a user).
 _DENIED_MESSAGE = {
     "can_edit_jd": "You don't have permission to edit this job description. Ask your admin.",

@@ -14,6 +14,7 @@ from seed import seed_if_empty
 import ai_service
 import routes_auth
 import routes_orgs
+import routes_assignments
 import routes_jobs
 import routes_candidates
 import routes_ai
@@ -133,6 +134,8 @@ async def api_root() -> dict:
 
 api_router.include_router(routes_auth.router)
 api_router.include_router(routes_orgs.router)
+api_router.include_router(routes_assignments.router)
+api_router.include_router(routes_assignments.mine_router)
 api_router.include_router(routes_jobs.router)
 api_router.include_router(routes_candidates.router)
 api_router.include_router(routes_ai.router)
