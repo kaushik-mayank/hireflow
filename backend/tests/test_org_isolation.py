@@ -244,6 +244,25 @@ def test_recruiter_cannot_create_job(world):
     assert e.value.status_code == 403
 
 
+def test_list_jobs_recruiter_gets_assignment_deadline_on_card(world):
+    _reset(
+        world,
+        jobs=[JOB_A],
+        assignments=[{"id": "as1", "org_id": "org-A", "job_id": "job-A", "user_id": "rec-A",
+                      "status": "active", "permissions": {},
+                      "deadline": "2026-09-01", "targets": {"shortlist_target": 5}}],
+    )
+    rows = run(world.jobs_r.list_jobs(RECRUITER_A))
+    assert rows[0]["my_deadline"] == "2026-09-01"
+    assert rows[0]["my_targets"]["shortlist_target"] == 5
+
+
+def test_list_jobs_manager_has_no_assignment_fields(world):
+    _reset(world, jobs=[JOB_A])
+    rows = run(world.jobs_r.list_jobs(MANAGER_A))
+    assert "my_deadline" not in rows[0]  # managers see org jobs, no personal assignment
+
+
 # ===========================================================================
 # Candidates
 # ===========================================================================

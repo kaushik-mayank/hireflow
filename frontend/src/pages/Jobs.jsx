@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Briefcase, Users, Calendar, MoreVertical, Eye, Pause, Play } from "lucide-react";
+import { Plus, Search, Briefcase, Users, Calendar, CalendarClock, Target, Eye, Pause, Play } from "lucide-react";
 import { jobsApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Button, ProgressBar, Skeleton, EmptyState } from "@/components/ui";
+import { useAuth } from "@/context/AuthContext";
 import { fmtDate } from "@/constants";
 import { toast } from "sonner";
 
 export default function Jobs() {
+  const { user } = useAuth();
+  // Only an org manager ("Admin") creates jobs and pauses/reactivates them;
+  // recruiters see the roles assigned to them, read-only at the list level.
+  const isManager = (user?.org_role || "manager") === "manager";
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -45,8 +50,8 @@ export default function Jobs() {
     <Layout>
       <Topbar
         title="Jobs"
-        subtitle="Manage your open roles and hiring quotas"
-        actions={<Button onClick={() => navigate("/jobs/create")} data-testid="jobs-create-btn"><Plus size={16} /> Create New Job</Button>}
+        subtitle={isManager ? "Manage your open roles and hiring quotas" : "Roles assigned to you"}
+        actions={isManager ? <Button onClick={() => navigate("/jobs/create")} data-testid="jobs-create-btn"><Plus size={16} /> Create New Job</Button> : null}
       />
       <PageBody>
         <div className="flex items-center gap-3 mb-5">
@@ -88,6 +93,14 @@ export default function Jobs() {
                   <ProgressBar value={j.hired_count} max={j.openings_needed} />
                 </div>
 
+                {(j.my_deadline || j.my_targets?.shortlist_target != null || j.my_targets?.sourced_target != null) && (
+                  <div className="flex flex-wrap items-center gap-3 mt-3 text-xs">
+                    {j.my_deadline && <span className="inline-flex items-center gap-1 text-[#92400e]"><CalendarClock size={13} /> Due {fmtDate(j.my_deadline)}</span>}
+                    {j.my_targets?.sourced_target != null && <span className="inline-flex items-center gap-1 text-gray-600"><Target size={13} /> Sourced {j.my_targets.sourced_target}</span>}
+                    {j.my_targets?.shortlist_target != null && <span className="inline-flex items-center gap-1 text-gray-600"><Target size={13} /> Shortlist {j.my_targets.shortlist_target}</span>}
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 text-sm text-gray-600">
                   <span className="flex items-center gap-1.5"><Users size={14} /> {j.candidate_count} candidates</span>
                   <span className="flex items-center gap-1.5"><Calendar size={14} /> {fmtDate(j.created_at)}</span>
@@ -95,16 +108,24 @@ export default function Jobs() {
 
                 <div className="flex gap-2 mt-4">
                   <Button variant="secondary" className="flex-1" onClick={(e) => { e.stopPropagation(); navigate(`/jobs/${j.id}`); }} data-testid={`job-view-${j.id}`}><Eye size={14} /> View</Button>
-                  <Button variant="ghost" onClick={(e) => toggleStatus(e, j)} data-testid={`job-toggle-${j.id}`}>
-                    {j.status === "active" ? <Pause size={14} /> : <Play size={14} />}
-                  </Button>
+                  {isManager && (
+                    <Button variant="ghost" onClick={(e) => toggleStatus(e, j)} data-testid={`job-toggle-${j.id}`}>
+                      {j.status === "active" ? <Pause size={14} /> : <Play size={14} />}
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}
           </div>
         ) : (
           <Card>
-            <EmptyState icon={Briefcase} title="No jobs found" subtitle={search || statusFilter !== "all" ? "Try adjusting your filters." : "Create your first job to start hiring."} action={<Button onClick={() => navigate("/jobs/create")}><Plus size={16} /> Create Job</Button>} />
+            {search || statusFilter !== "all" ? (
+              <EmptyState icon={Briefcase} title="No jobs found" subtitle="Try adjusting your filters." />
+            ) : isManager ? (
+              <EmptyState icon={Briefcase} title="No jobs yet" subtitle="Create your first job to start hiring." action={<Button onClick={() => navigate("/jobs/create")}><Plus size={16} /> Create Job</Button>} />
+            ) : (
+              <EmptyState icon={Briefcase} title="No roles assigned yet" subtitle="Your admin will assign roles to you. They'll appear here with your targets and deadline." />
+            )}
           </Card>
         )}
       </PageBody>

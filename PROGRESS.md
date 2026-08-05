@@ -4,8 +4,43 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Session 28: closed candidate permission-enforcement gap (backend) + gated candidate/board UI. ⚠️ Frontend (Sessions 22/24/26/27/28) needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — IN PROGRESS (not complete). Phases 8–12 done (10 reworked to approved-email); 13 partial, 14 partial (14a), 15 not started. ⚠️ Frontend (Sessions 22/24/26/27/28/29) needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-05
+
+---
+
+## 📋 Cycle 2 completion status (honest ledger — updated Session 29)
+
+| Phase | Status | Outstanding |
+|---|---|---|
+| 8 — Re-audit & design lock | ✅ Done | — (`CYCLE2_AUDIT.md`) |
+| 9 — Data model, scoping, migration | ✅ Done | JWT change intentionally **skipped** (confirmed decision C1) |
+| 10 — Auth & onboarding | ✅ Done (**reworked**) | Emailed-invite/token flow replaced by **approved-email + first-login create-password** (owner decision, Session 21/26). `invites.py`/`invitations` kept dormant for a future cycle |
+| 11 — Team management UI | 🟡 Mostly | **`/team/:userId` member detail page**; **remove-with-reassignment** for *active* members (only suspend + pending-removal ship) |
+| 12 — Assignments, permissions, JD | 🟡 Mostly | **Bulk assign** (assign is one-at-a-time); **"admin updated the JD" notice** to recruiters with an override |
+| 13 — Recruiter experience | 🟡 Partial | Done: disabled-with-tooltip controls, graceful 403s, recruiter job list w/ deadline+targets & role-aware buttons (Session 29). Pending: recruiter **dashboard tiles** pass, **permission-mirroring tests**. (*Assigned/My tabs are N/A in Cycle 2 — personal jobs deferred to Cycle 3.*) |
+| 14 — Manager reports | 🟡 Partial (14a) | Done: throughput, target attainment, deadline health, workload, insights + `/reports/team`. **Pending (14b): funnel-by-recruiter, quality-of-sourcing, time-metrics, source-by-recruiter, roles-needing-attention, activity, AI-usage panels; shared filters; CSV export; `activity_events` at every mutation; golden-numbers payload test; recharts** |
+| 15 — Recruiter reports, hardening, handover | 🔴 Not started | §8.2 recruiter report panels; N+1 sweep (aggregation pipelines); index verification vs real Mongo; bundle check (manager-only code not shipped to recruiters); full regression; **owner runbook** (env vars, migration cmd, rollout/rollback); final `PROJECT_PLAN.md` update |
+
+**Cross-cutting caveats:** the frontend has **never been built in this environment** (no Node) — six batches await one owner `CI=true yarn build`; and **nothing has been run against real Mongo/Firebase/SMTP** — all backend verification is offline unit + stub-route tests (**296 pass forwards AND reverse**). Migration (`migrate_orgs.py`) and `seed.py` remain **un-run against a database**.
+
+---
+
+## Session 29 — 2026-08-05 — Cycle 2 status audit + Phase 13 recruiter job list
+
+Owner asked whether everything is complete. Audited against the plan: **not complete** — see the ledger above (added this session). Then cleared one concrete Phase 13 gap.
+
+### Recruiter job list (Phase 13)
+- **`routes_jobs.list_jobs`**: for a recruiter, attaches their active assignment's **`my_deadline`** + **`my_targets`** to each job card (managers get neither — they see all org jobs). One extra query, keyed in memory.
+- **`pages/Jobs.jsx`**: role-aware — the **Create New Job** button and per-card **pause/reactivate** show for managers only; recruiter cards show **deadline + target** chips; recruiter empty state reads "No roles assigned yet" (not "create a job"); subtitle adapts. Removed a **pre-existing unused `MoreVertical` import** (would fail `CI=true`).
+- Tests: `test_org_isolation.py` **+2** (recruiter card carries deadline/targets; manager card has none). **296 offline tests pass forwards AND reverse** (294 → 296).
+
+### Honest status
+- Frontend not built here (static-checked only). Backend offline-tested. The ledger above is now the single source of truth for what remains (Phases 11 leftovers, 12 leftovers, 13 finish, 14b, 15).
+
+### Owner action items
+1. **Run `CI=true yarn build`** (covers Sessions 22/24/26/27/28/29).
+2. Decide priority for the remaining work: I'd suggest **14b (manager reports)** and **15 (hardening + runbook)** next, since those are the largest gaps and 15 gates a safe production rollout.
 
 ---
 

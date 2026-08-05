@@ -59,7 +59,23 @@ async def list_jobs(user: dict = Depends(permissions.require_org_member)):
         query["id"] = {"$in": accessible}
     docs = await jobs.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     counts = await _counts_for_jobs([d["id"] for d in docs])
-    return [_apply_counts(d, counts) for d in docs]
+    result = [_apply_counts(d, counts) for d in docs]
+
+    # For a recruiter, attach their own assignment's deadline/targets so the job
+    # card can show them (managers see all org jobs and have no assignment).
+    if accessible is not None and result:
+        rows = await job_assignments.find(
+            {"org_id": org_id, "user_id": user["id"], "status": "active",
+             "job_id": {"$in": [d["id"] for d in result]}},
+            {"_id": 0, "job_id": 1, "deadline": 1, "targets": 1},
+        ).to_list(1000)
+        by_job = {r["job_id"]: r for r in rows}
+        for d in result:
+            a = by_job.get(d["id"])
+            if a:
+                d["my_deadline"] = a.get("deadline")
+                d["my_targets"] = a.get("targets") or {}
+    return result
 
 
 @router.post("")
