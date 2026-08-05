@@ -14,13 +14,16 @@ every stage change, which is what makes a true conversion funnel, per-stage
 dwell time and stalled-posting detection possible.
 """
 
+import csv
+import io
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 
-from database import jobs, candidates, stage_transitions, users, job_assignments
+from database import jobs, candidates, stage_transitions, users, job_assignments, activity_events, ai_usage_log
 import permissions
 import team_reports as tr
 
@@ -488,11 +491,11 @@ async def reports(user: dict = Depends(permissions.require_org_member)) -> dict:
 # lives in the pure `team_reports` module so it is fully unit-tested.
 # ---------------------------------------------------------------------------
 
-@router.get("/team")
-async def team_report(user: dict = Depends(permissions.require_manager)) -> dict:
-    org_id = user["org_id"]
-    now = datetime.now(timezone.utc)
-
+async def _team_report_data(org_id: str, now: datetime, range_days: Optional[int]) -> dict:
+    """Assemble the whole manager team report. Shared by the JSON endpoint and the
+    CSV export so both always agree. `range_days` (7/30/90/…) restricts the
+    volume panels (throughput, quality, activity) to that recent window; the
+    deadline/target/attention panels always reflect current state."""
     members = await users.find(
         {"org_id": org_id, "org_role": "recruiter"},
         {"_id": 0, "id": 1, "name": 1, "email": 1, "status": 1, "last_login_at": 1},
@@ -503,7 +506,9 @@ async def team_report(user: dict = Depends(permissions.require_manager)) -> dict
     assignments = await job_assignments.find(
         {"org_id": org_id, "status": {"$in": ["active", "paused"]}}, {"_id": 0}
     ).to_list(5000)
-    org_jobs = await jobs.find({"org_id": org_id}, {"_id": 0, "id": 1, "title": 1, "status": 1}).to_list(2000)
+    org_jobs = await jobs.find(
+        {"org_id": org_id}, {"_id": 0, "id": 1, "title": 1, "status": 1, "openings_needed": 1, "created_at": 1}
+    ).to_list(2000)
     title_by_job = {j["id"]: j for j in org_jobs}
 
     cands = await candidates.find(
@@ -516,12 +521,54 @@ async def team_report(user: dict = Depends(permissions.require_manager)) -> dict
     transitions_by_cand = defaultdict(list)
     for t in transitions:
         transitions_by_cand[t["candidate_id"]].append(t)
+    events = await activity_events.find(
+        {"org_id": org_id}, {"_id": 0, "actor_id": 1, "created_at": 1}
+    ).to_list(200000)
+    usage = await ai_usage_log.find({"org_id": org_id}, {"_id": 0, "user_id": 1}).to_list(200000)
 
-    throughput = tr.throughput_by_recruiter(recruiter_ids, cands, transitions_by_cand)
+    # Volume panels honour the date-range window; state panels do not.
+    window = int(range_days) if range_days else 30
+    if range_days:
+        cutoff = now - timedelta(days=int(range_days))
+        ranged = [c for c in cands if (tr._parse(c.get("uploaded_at")) and tr._parse(c.get("uploaded_at")) >= cutoff)]
+    else:
+        ranged = cands
+
+    cands_by_job = defaultdict(list)
+    for c in cands:
+        cands_by_job[c["job_id"]].append(c)
+    assignments_by_job = defaultdict(list)
+    for a in assignments:
+        assignments_by_job[a["job_id"]].append(a)
+
+    job_of_cand = {c["id"]: c["job_id"] for c in cands}
+    last_activity_by_job: dict = {}
+    for t in transitions:
+        jid = job_of_cand.get(t["candidate_id"])
+        moved = tr._parse(t.get("moved_at"))
+        if jid and moved and (jid not in last_activity_by_job or moved > last_activity_by_job[jid]):
+            last_activity_by_job[jid] = moved
+    for c in cands:
+        up = tr._parse(c.get("uploaded_at"))
+        jid = c["job_id"]
+        if up and (jid not in last_activity_by_job or up > last_activity_by_job[jid]):
+            last_activity_by_job[jid] = up
+
+    throughput = tr.throughput_by_recruiter(recruiter_ids, ranged, transitions_by_cand)
+    quality = tr.quality_of_sourcing(recruiter_ids, ranged, transitions_by_cand)
     attainment = tr.target_attainment(assignments, cands, transitions_by_cand, now)
     deadlines = tr.deadline_health(assignments, now)
     workload = tr.workload_balance(recruiter_ids, assignments, cands)
+    roles = tr.roles_needing_attention(org_jobs, assignments_by_job, cands_by_job, last_activity_by_job, now)
+    activity = tr.activity_summary(recruiter_ids, events, now, window_days=window)
     ins = tr.insights(throughput, attainment, deadlines, now)
+
+    ai_counts: dict = {}
+    for u in usage:
+        uid = u.get("user_id")
+        if uid in member_by_id:
+            ai_counts[uid] = ai_counts.get(uid, 0) + 1
+    ai_usage = [{"user_id": rid, "ai_calls": ai_counts.get(rid, 0)} for rid in recruiter_ids]
 
     def with_user(row):
         m = member_by_id.get(row["user_id"]) or {}
@@ -533,20 +580,23 @@ async def team_report(user: dict = Depends(permissions.require_manager)) -> dict
         row["job_title"] = (title_by_job.get(row.get("job_id")) or {}).get("title")
         return row
 
-    for r in throughput:
+    for r in throughput + quality + workload + activity + ai_usage:
         with_user(r)
-    for r in workload:
-        with_user(r)
-    for r in attainment:
+    for r in attainment + deadlines:
         with_user(with_job(r))
-    for r in deadlines:
-        with_user(with_job(r))
+    for r in roles:
+        with_job(r)
 
     return {
+        "range_days": range_days,
         "throughput": throughput,
+        "quality_of_sourcing": quality,
         "target_attainment": attainment,
         "deadline_health": deadlines,
         "workload": workload,
+        "roles_needing_attention": roles,
+        "activity": activity,
+        "ai_usage": ai_usage,
         "insights": ins,
         "totals": {
             "recruiters": len(members),
@@ -554,4 +604,89 @@ async def team_report(user: dict = Depends(permissions.require_manager)) -> dict
             "candidates": len(cands),
             "hires": sum(r["hired"] for r in throughput),
         },
+    }
+
+
+@router.get("/team")
+async def team_report(range_days: Optional[int] = Query(None), user: dict = Depends(permissions.require_manager)) -> dict:
+    return await _team_report_data(user["org_id"], datetime.now(timezone.utc), range_days)
+
+
+# CSV columns per panel (server-generated, org-scoped, stdlib csv only).
+_CSV_PANELS = {
+    "throughput": (["user_name", "user_email", "sourced", "shortlisted", "interviewed", "hired", "shortlist_rate", "hire_rate"], "throughput"),
+    "quality": (["user_name", "user_email", "sourced", "shortlist_rate", "interview_rate", "hire_rate", "reject_after_screen_rate"], "quality_of_sourcing"),
+    "workload": (["user_name", "user_email", "open_assignments", "active_candidates"], "workload"),
+    "activity": (["user_name", "user_email", "events", "last_active"], "activity"),
+    "ai_usage": (["user_name", "user_email", "ai_calls"], "ai_usage"),
+    "deadlines": (["user_name", "job_title", "deadline", "days_remaining", "overdue"], "deadline_health"),
+}
+
+
+@router.get("/team/export.csv", response_class=PlainTextResponse)
+async def team_report_csv(
+    panel: str = Query("throughput"),
+    range_days: Optional[int] = Query(None),
+    user: dict = Depends(permissions.require_manager),
+):
+    if panel not in _CSV_PANELS:
+        raise HTTPException(status_code=400, detail=f"Unknown panel. Choose one of: {', '.join(_CSV_PANELS)}")
+    columns, key = _CSV_PANELS[panel]
+    data = await _team_report_data(user["org_id"], datetime.now(timezone.utc), range_days)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(columns)
+    for row in data.get(key, []):
+        writer.writerow(["" if row.get(c) is None else row.get(c) for c in columns])
+    headers = {"Content-Disposition": f'attachment; filename="team-{panel}.csv"'}
+    return PlainTextResponse(content=buf.getvalue(), media_type="text/csv", headers=headers)
+
+
+@router.get("/mine")
+async def my_report(range_days: Optional[int] = Query(None), user: dict = Depends(permissions.require_org_member)) -> dict:
+    """A recruiter's own assignment-centric report: their target progress,
+    deadlines, throughput and activity. Never a leaderboard against colleagues —
+    the manager sees comparisons, the recruiter sees only their own (§8.2). The
+    existing `GET /reports` still serves their funnel / sources / time-to-hire."""
+    org_id = user["org_id"]
+    uid = user["id"]
+    now = datetime.now(timezone.utc)
+
+    assignments = await job_assignments.find(
+        {"org_id": org_id, "user_id": uid, "status": "active"}, {"_id": 0}
+    ).to_list(2000)
+    my_cands = await candidates.find(
+        {"org_id": org_id, "sourced_by": uid},
+        {"_id": 0, "id": 1, "job_id": 1, "sourced_by": 1, "stage": 1, "uploaded_at": 1},
+    ).to_list(20000)
+    cand_ids = [c["id"] for c in my_cands]
+    transitions = await stage_transitions.find(
+        {"candidate_id": {"$in": cand_ids}}, {"_id": 0}
+    ).to_list(100000)
+    transitions_by_cand = defaultdict(list)
+    for t in transitions:
+        transitions_by_cand[t["candidate_id"]].append(t)
+    events = await activity_events.find(
+        {"org_id": org_id, "actor_id": uid}, {"_id": 0, "actor_id": 1, "created_at": 1}
+    ).to_list(50000)
+
+    job_ids = list({*(a["job_id"] for a in assignments), *(c["job_id"] for c in my_cands)})
+    titles = {}
+    if job_ids:
+        async for j in jobs.find({"id": {"$in": job_ids}}, {"_id": 0, "id": 1, "title": 1}):
+            titles[j["id"]] = j.get("title")
+
+    throughput = tr.throughput_by_recruiter([uid], my_cands, transitions_by_cand)
+    attainment = tr.target_attainment(assignments, my_cands, transitions_by_cand, now)
+    deadlines = tr.deadline_health(assignments, now)
+    activity = tr.activity_summary([uid], events, now, window_days=int(range_days) if range_days else 30)
+    for r in attainment + deadlines:
+        r["job_title"] = titles.get(r.get("job_id"))
+
+    return {
+        "throughput": throughput[0] if throughput else None,
+        "target_attainment": attainment,
+        "deadline_health": deadlines,
+        "activity": activity[0] if activity else None,
+        "totals": {"assignments": len(assignments), "candidates": len(my_cands)},
     }

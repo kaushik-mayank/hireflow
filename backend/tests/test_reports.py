@@ -52,11 +52,13 @@ def rp():
             super().__init__(detail)
 
     stub("fastapi", APIRouter=_APIRouter, Depends=lambda dependency=None: None,
-         HTTPException=_HTTPException)
-    # routes_reports now imports the permissions spine, which imports these extra
-    # collections from `database` — stub them too so the import resolves offline.
+         HTTPException=_HTTPException, Query=lambda default=None, **k: default)
+    stub("fastapi.responses", PlainTextResponse=object)
+    # routes_reports now imports the permissions spine + team-report deps — stub
+    # every collection it pulls from `database` so the import resolves offline.
     stub("database", jobs=None, candidates=None, stage_transitions=None,
-         job_assignments=None, job_jd_overrides=None, users=None)
+         job_assignments=None, job_jd_overrides=None, users=None,
+         activity_events=None, ai_usage_log=None)
     stub("auth", get_current_user=None)
 
     import routes_reports

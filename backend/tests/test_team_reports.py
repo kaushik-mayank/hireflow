@@ -185,3 +185,66 @@ def test_insights_flag_overdue_and_hires():
 
 def test_insights_empty_on_no_data():
     assert tr.insights([], [], [], NOW) == []
+
+
+# ---------------------------------------------------------------------------
+# quality_of_sourcing
+# ---------------------------------------------------------------------------
+
+def test_quality_zero_data():
+    rows = tr.quality_of_sourcing(["r1"], [], {})
+    assert rows[0]["sourced"] == 0 and rows[0]["shortlist_rate"] is None
+
+
+def test_quality_reject_after_screen():
+    # 6 sourced, all shortlisted (via history); 3 later Rejected.
+    cands, trans = [], {}
+    for i in range(6):
+        cid = f"c{i}"
+        cands.append(cand(cid, "r1", stage="Rejected" if i < 3 else "Shortlisted"))
+        trans[cid] = [{"from_stage": "AI Ranked", "to_stage": "Shortlisted"}]
+    rows = tr.quality_of_sourcing(["r1"], cands, trans)
+    assert rows[0]["shortlist_rate"] == 100.0
+    assert rows[0]["reject_after_screen_rate"] == 50.0  # 3 of 6 shortlisted rejected
+
+
+# ---------------------------------------------------------------------------
+# roles_needing_attention
+# ---------------------------------------------------------------------------
+
+def test_roles_flags_unassigned_and_stale_skips_filled():
+    jobs = [
+        {"id": "j1", "status": "active", "openings_needed": 1, "created_at": iso(-40)},   # stale + unassigned + no cands
+        {"id": "j2", "status": "active", "openings_needed": 1, "created_at": iso(-40)},   # filled -> excluded
+        {"id": "j3", "status": "closed", "openings_needed": 1, "created_at": iso(-40)},   # not active -> excluded
+    ]
+    cands_by_job = {"j2": [cand("c1", "r1", job="j2", stage="Selected")]}
+    rows = tr.roles_needing_attention(jobs, {}, cands_by_job, {}, NOW)
+    ids = {r["job_id"] for r in rows}
+    assert ids == {"j1"}
+    assert "unassigned" in rows[0]["reasons"] and "no candidates" in rows[0]["reasons"]
+
+
+def test_roles_past_deadline():
+    jobs = [{"id": "j1", "status": "active", "openings_needed": 1, "created_at": iso(-1)}]
+    assignments_by_job = {"j1": [assignment("r1", job="j1", deadline=iso(-3))]}
+    cands_by_job = {"j1": [cand("c1", "r1", job="j1")]}
+    last_activity = {"j1": tr._parse(iso(-1))}
+    rows = tr.roles_needing_attention(jobs, assignments_by_job, cands_by_job, last_activity, NOW)
+    assert "past deadline" in rows[0]["reasons"]
+
+
+# ---------------------------------------------------------------------------
+# activity_summary
+# ---------------------------------------------------------------------------
+
+def test_activity_summary_window_and_last_active():
+    events = [
+        {"actor_id": "r1", "created_at": iso(-2)},
+        {"actor_id": "r1", "created_at": iso(-40)},   # outside 30d window
+        {"actor_id": "other", "created_at": iso(-1)}, # not a tracked recruiter
+    ]
+    rows = tr.activity_summary(["r1"], events, NOW, window_days=30)
+    r1 = rows[0]
+    assert r1["events"] == 1                       # only the in-window one counts
+    assert r1["last_active"] == iso(-2)            # most recent overall

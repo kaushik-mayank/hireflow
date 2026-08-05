@@ -127,7 +127,8 @@ def world():
 
     _merge_stub("fastapi", HTTPException=_HTTPException, Depends=lambda dep=None: None,
                 APIRouter=_APIRouter, UploadFile=object, File=lambda *a, **k: None,
-                Form=lambda *a, **k: None)
+                Form=lambda *a, **k: None, Query=lambda default=None, **k: default)
+    _merge_stub("fastapi.responses", PlainTextResponse=object)
 
     colls = {
         "jobs": FakeColl(),
@@ -444,7 +445,7 @@ def test_team_report_manager_scoped_to_org(world):
         {"id": "rec-A", "org_id": "org-A", "org_role": "recruiter", "name": "Rec A", "email": "r@a.com"},
         {"id": "rec-B", "org_id": "org-B", "org_role": "recruiter", "name": "Rec B", "email": "r@b.com"},
     ]
-    out = run(world.rep_r.team_report(MANAGER_A))
+    out = run(world.rep_r.team_report(None, MANAGER_A))
     assert {r["user_id"] for r in out["throughput"]} == {"rec-A"}  # org-B recruiter excluded
     assert out["totals"]["recruiters"] == 1
 

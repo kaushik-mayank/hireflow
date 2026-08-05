@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
-from database import jobs, candidates, stage_transitions, job_assignments, job_jd_overrides
+from database import jobs, candidates, stage_transitions, job_assignments, job_jd_overrides, activity_events
 from auth import get_current_user
 from models import JobCreate, JobUpdate
 import permissions
@@ -105,6 +105,11 @@ async def create_job(body: JobCreate, user: dict = Depends(permissions.require_m
     }
     await jobs.insert_one(job)
     job.pop("_id", None)
+    await activity_events.insert_one({
+        "id": str(uuid.uuid4()), "org_id": user["org_id"], "actor_id": user["id"],
+        "job_id": job["id"], "candidate_id": None, "type": "job_created",
+        "meta": {"title": job["title"]}, "created_at": now,
+    })
     return await _job_stats(job)
 
 
@@ -160,8 +165,15 @@ async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_curr
     # detected without any non-JD edit tripping the "admin updated the JD" notice.
     if "jd_text" in updates or "jd_enhanced" in updates:
         updates["jd_updated_at"] = updates["updated_at"]
+    became_closed = updates.get("status") == "closed" and job.get("status") != "closed"
     await jobs.update_one({"id": job_id}, {"$set": updates})
     job.update(updates)
+    if became_closed:
+        await activity_events.insert_one({
+            "id": str(uuid.uuid4()), "org_id": access.org_id, "actor_id": user["id"],
+            "job_id": job_id, "candidate_id": None, "type": "job_closed",
+            "meta": {}, "created_at": updates["updated_at"],
+        })
     return await _job_stats(job)
 
 

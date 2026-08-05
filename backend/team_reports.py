@@ -234,3 +234,94 @@ def insights(throughput, attainment, deadlines, now: datetime) -> list:
         })
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Phase 14b panels
+# ---------------------------------------------------------------------------
+
+STALE_DAYS = 14
+
+
+def quality_of_sourcing(recruiter_ids, candidates, transitions_by_cand) -> list:
+    """Conversion quality per recruiter — the signal that matters more than raw
+    volume. `reject_after_screen_rate` is share of shortlisted who ended Rejected."""
+    by_rec = {rid: [] for rid in recruiter_ids}
+    for c in candidates:
+        if c.get("sourced_by") in by_rec:
+            by_rec[c["sourced_by"]].append(c)
+
+    rows = []
+    for rid, cands in by_rec.items():
+        sourced = len(cands)
+        shortlisted = sum(1 for c in cands if furthest_index(c, transitions_by_cand) >= SHORTLISTED_IDX)
+        interviewed = sum(1 for c in cands if furthest_index(c, transitions_by_cand) >= INTERVIEW_IDX)
+        hired = sum(1 for c in cands if c.get("stage") == HIRED_STAGE)
+        rejected_after_screen = sum(
+            1 for c in cands
+            if furthest_index(c, transitions_by_cand) >= SHORTLISTED_IDX and c.get("stage") == REJECTED_STAGE
+        )
+        rows.append({
+            "user_id": rid,
+            "sourced": sourced,
+            "shortlist_rate": _pct(shortlisted, sourced),
+            "interview_rate": _pct(interviewed, sourced),
+            "hire_rate": _pct(hired, sourced),
+            "reject_after_screen_rate": _pct(rejected_after_screen, shortlisted),
+        })
+    return sorted(rows, key=lambda r: r["sourced"], reverse=True)
+
+
+def roles_needing_attention(jobs, assignments_by_job, cands_by_job, last_activity_by_job, now) -> list:
+    """Open, unfilled roles that need a decision: unassigned, stalled 14+ days,
+    past a deadline, or with no candidates. The manager's 'what to do next' list."""
+    rows = []
+    for job in jobs:
+        if job.get("status") != "active":
+            continue
+        cands = cands_by_job.get(job["id"], [])
+        hired = sum(1 for c in cands if c.get("stage") == HIRED_STAGE)
+        needed = job.get("openings_needed") or 1
+        if hired >= needed:
+            continue  # filled
+
+        assigns = assignments_by_job.get(job["id"], [])
+        reasons = []
+        if not assigns:
+            reasons.append("unassigned")
+        last = last_activity_by_job.get(job["id"]) or _parse(job.get("created_at"))
+        idle = _days_between(last, now)
+        if idle is not None and idle >= STALE_DAYS:
+            reasons.append(f"no movement in {idle} days")
+        if any((_parse(a.get("deadline")) and now > _parse(a.get("deadline"))) for a in assigns):
+            reasons.append("past deadline")
+        if not cands:
+            reasons.append("no candidates")
+
+        if reasons:
+            rows.append({
+                "job_id": job["id"], "reasons": reasons, "idle_days": idle,
+                "hired": hired, "needed": needed,
+            })
+    return sorted(rows, key=lambda r: (r["idle_days"] if r["idle_days"] is not None else -1), reverse=True)
+
+
+def activity_summary(recruiter_ids, activity_events, now, window_days=30) -> list:
+    """Events per recruiter over the window, plus their last-active timestamp."""
+    from datetime import timedelta
+    cutoff = now - timedelta(days=window_days)
+    counts = {rid: 0 for rid in recruiter_ids}
+    last = {rid: None for rid in recruiter_ids}
+    for e in activity_events:
+        rid = e.get("actor_id")
+        if rid not in counts:
+            continue
+        ts = _parse(e.get("created_at"))
+        if ts is None:
+            continue
+        if ts >= cutoff:
+            counts[rid] += 1
+        prev = _parse(last[rid])
+        if prev is None or ts > prev:
+            last[rid] = e.get("created_at")
+    return [{"user_id": rid, "events": counts[rid], "last_active": last[rid]} for rid in recruiter_ids]
