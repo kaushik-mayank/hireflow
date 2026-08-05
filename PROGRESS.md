@@ -4,8 +4,36 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Session 27: permission-gated job controls (Phase 13) + manager team-report view (Phase 14 fe). ⚠️ Frontend (Sessions 22/24/26/27) needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Session 28: closed candidate permission-enforcement gap (backend) + gated candidate/board UI. ⚠️ Frontend (Sessions 22/24/26/27/28) needs an owner `CI=true yarn build`.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-05
+
+---
+
+## Session 28 — 2026-08-05 — Cycle 2: enforce candidate permission flags (backend) + gate candidate/board UI
+
+**Security gap found & fixed:** `can_upload_candidates`, `can_move_stage` and `can_reject_candidates` were defined and shown in the assign drawer but **not enforced on the write endpoints** — a recruiter without them could still upload / move / reject via the API. The mandate is "every permission toggle has a backend check + test," so this was a real hole, now closed.
+
+### Backend (offline-tested — the real enforcement)
+- **`routes_candidates.py`**:
+  - `upload_resumes` → `require_permission(can_upload_candidates)` (403 before any file is read).
+  - `update_stage` → requires `can_reject_candidates` when the target stage is **Rejected**, else `can_move_stage`.
+  - `bulk_update_stage` → same per-job check; candidates on jobs the caller can't move are **skipped** (the batch doesn't fail wholesale).
+  - `get_candidate` now returns `effective_permissions` + `access_scope` so the UI can gate controls.
+- Tests: `test_org_isolation.py` **+5** — upload/move/reject denied without the flag (403), move allowed with it, and `get_candidate` exposes effective_permissions. **294 offline tests pass forwards AND reverse** (289 → 294).
+
+### Frontend (⚠️ not built here) — reflect the flags everywhere candidates are actioned
+- **`CandidateDetail.jsx`**: stage buttons (Select/Schedule/On Hold gated on `can_move_stage`, Reject on `can_reject_candidates`), the "move to other stage" select, all **AI Actions** + the "Formatted view" (an AI call) gated on `can_use_ai` — each disabled with a tooltip + an explanatory line, instead of a 403 after clicking.
+- **`CandidateBoard.jsx`**: drag-to-move disabled when `!can_move_stage` (cards non-draggable, view-only banner); the slide-in panel's move buttons (Reject vs move) and AI buttons gated the same way.
+
+Backend remains the real gate; the UI gating is UX so recruiters see *why* a control is unavailable.
+
+### What was NOT verified (honesty)
+- **No `CI=true yarn build`** here — static checks only (all new symbols referenced; no unused imports).
+- Gating reads `job/candidate.effective_permissions` from the API; a manager (all-true) and legacy responses (undefined → allowed) are never locked out.
+
+### Owner action items
+1. **Run `CI=true yarn build`** (covers Sessions 22/24/26/27/28) and paste any errors.
+2. QA: a recruiter without move/reject/upload/AI sees those controls disabled with a tooltip on the candidate page AND the Kanban board, and the API refuses them (403) if bypassed.
 
 ---
 

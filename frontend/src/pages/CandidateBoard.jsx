@@ -7,6 +7,8 @@ import { ScoreBadge, StageBadge, Avatar, Pill, AIButton, Button, Spinner, Modal 
 import { STAGES, STAGE_COLORS } from "@/constants";
 import { toast } from "sonner";
 
+const NO_PERM = "Your admin hasn't given you this permission on this job.";
+
 export default function CandidateBoard() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -16,6 +18,11 @@ export default function CandidateBoard() {
   const [dragId, setDragId] = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
   const [panel, setPanel] = useState(null);
+
+  // Permission gate from the job's effective_permissions (managers all true;
+  // undefined defaults to allowed so legacy responses never lock anyone out).
+  const perms = job?.effective_permissions || {};
+  const canMove = perms.can_move_stage !== false;
 
   const load = useCallback(() => {
     Promise.all([jobsApi.get(id), candidatesApi.listByJob(id)])
@@ -31,6 +38,7 @@ export default function CandidateBoard() {
     const cand = cands.find((c) => c.id === dragId);
     setDragId(null);
     if (!cand || cand.stage === stage) return;
+    if (!canMove) { toast.error("Moving candidates isn't enabled for you on this job."); return; }
     const prev = cand.stage;
     setCands((cs) => cs.map((c) => (c.id === cand.id ? { ...c, stage } : c)));
     try {
@@ -56,6 +64,13 @@ export default function CandidateBoard() {
           subtitle={`${cands.length} candidates · ${job.hired_count}/${job.openings_needed} hired`}
           actions={<Button variant="ghost" onClick={() => navigate(`/jobs/${id}`)}><ArrowLeft size={16} /> Back to Job</Button>}
         />
+        {!canMove && (
+          <div className="px-5 pt-3">
+            <div className="bg-amber-light/60 text-[#92400e] text-xs rounded-lg px-3 py-2">
+              You can view this pipeline, but moving candidates isn't enabled for you on this job.
+            </div>
+          </div>
+        )}
         <div className="flex-1 overflow-x-auto kanban-scroll p-5">
           <div className="flex gap-3 h-full min-w-max">
             {STAGES.map((stage) => {
@@ -82,11 +97,11 @@ export default function CandidateBoard() {
                     {items.map((c) => (
                       <div
                         key={c.id}
-                        draggable
-                        onDragStart={() => setDragId(c.id)}
+                        draggable={canMove}
+                        onDragStart={() => canMove && setDragId(c.id)}
                         onDragEnd={() => { setDragId(null); setDragOverStage(null); }}
                         onClick={() => setPanel(c)}
-                        className={`bg-white rounded-lg border border-gray-200 p-3 cursor-grab active:cursor-grabbing hover:shadow-card transition-all ${dragId === c.id ? "opacity-40" : ""}`}
+                        className={`bg-white rounded-lg border border-gray-200 p-3 hover:shadow-card transition-all ${canMove ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${dragId === c.id ? "opacity-40" : ""}`}
                         data-testid={`kanban-card-${c.id}`}
                       >
                         <div className="flex items-center gap-2">
@@ -121,6 +136,12 @@ function CandidatePanel({ candidate, job, onClose, onUpdated, navigate }) {
   const [emailLoading, setEmailLoading] = useState(false);
   const [questions, setQuestions] = useState(null);
   const [email, setEmail] = useState(null);
+
+  const perms = job?.effective_permissions || {};
+  const can = (f) => perms[f] !== false;
+  const canMove = can("can_move_stage");
+  const canReject = can("can_reject_candidates");
+  const canUseAI = can("can_use_ai");
 
   const move = async (stage) => {
     setMoving(true);
@@ -183,15 +204,18 @@ function CandidatePanel({ candidate, job, onClose, onUpdated, navigate }) {
           <div>
             <div className="text-xs font-semibold text-gray-600 uppercase mb-2">Move to Stage</div>
             <div className="grid grid-cols-2 gap-2">
-              {["Shortlisted", "Interview Scheduled", "Selected", "Rejected"].map((s) => (
-                <Button key={s} variant="secondary" disabled={moving} onClick={() => move(s)} className="!text-xs !py-1.5" data-testid={`panel-move-${s}`}>{s}</Button>
-              ))}
+              {["Shortlisted", "Interview Scheduled", "Selected", "Rejected"].map((s) => {
+                const allowed = s === "Rejected" ? canReject : canMove;
+                return (
+                  <Button key={s} variant="secondary" disabled={moving || !allowed} title={allowed ? undefined : NO_PERM} onClick={() => move(s)} className="!text-xs !py-1.5" data-testid={`panel-move-${s}`}>{s}</Button>
+                );
+              })}
             </div>
           </div>
 
           <div className="space-y-2 pt-2 border-t border-gray-100">
-            <AIButton loading={qLoading} onClick={genQuestions} className="w-full" data-testid="panel-questions">Generate Questions</AIButton>
-            <AIButton loading={emailLoading} onClick={draftEmail} className="w-full" data-testid="panel-email">Draft Email</AIButton>
+            <AIButton loading={qLoading} onClick={genQuestions} disabled={!canUseAI} title={canUseAI ? undefined : NO_PERM} className="w-full" data-testid="panel-questions">Generate Questions</AIButton>
+            <AIButton loading={emailLoading} onClick={draftEmail} disabled={!canUseAI} title={canUseAI ? undefined : NO_PERM} className="w-full" data-testid="panel-email">Draft Email</AIButton>
             <Button variant="ghost" onClick={() => navigate(`/candidates/${candidate.id}`)} className="w-full" data-testid="panel-full-profile"><ExternalLink size={15} /> Full Profile</Button>
           </div>
 

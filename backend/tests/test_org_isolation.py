@@ -291,6 +291,48 @@ def test_list_candidates_manager_sees_all(world):
     assert {r["id"] for r in rows} == {"cand-A", "cand-A-other"}
 
 
+def _assign(perms):
+    return {"id": "as1", "org_id": "org-A", "job_id": "job-A", "user_id": "rec-A",
+            "status": "active", "permissions": perms}
+
+
+def test_get_candidate_exposes_effective_permissions(world):
+    _reset(world, jobs=[JOB_A], candidates=[CAND_A], assignments=[_assign({})])
+    out = run(world.cand_r.get_candidate("cand-A", RECRUITER_A))
+    assert out["access_scope"] == "assigned"
+    assert out["effective_permissions"]["can_move_stage"] is True  # a default
+
+
+# ---- permission enforcement on writes (every toggle has a backend check) ----
+
+def test_upload_denied_without_permission(world):
+    _reset(world, jobs=[JOB_A], candidates=[], assignments=[_assign({"can_upload_candidates": False})])
+    with pytest.raises(world.exc) as e:
+        run(world.cand_r.upload_resumes("job-A", files=[], source="LinkedIn", user=RECRUITER_A))
+    assert e.value.status_code == 403
+
+
+def test_move_stage_denied_without_permission(world):
+    _reset(world, jobs=[JOB_A], candidates=[CAND_A], assignments=[_assign({"can_move_stage": False})])
+    with pytest.raises(world.exc) as e:
+        run(world.cand_r.update_stage("cand-A", _ns(stage="Shortlisted", note=None), RECRUITER_A))
+    assert e.value.status_code == 403
+
+
+def test_reject_denied_without_reject_permission(world):
+    # can_move_stage stays True (default) — only the reject flag is off.
+    _reset(world, jobs=[JOB_A], candidates=[CAND_A], assignments=[_assign({"can_reject_candidates": False})])
+    with pytest.raises(world.exc) as e:
+        run(world.cand_r.update_stage("cand-A", _ns(stage="Rejected", note=None), RECRUITER_A))
+    assert e.value.status_code == 403
+
+
+def test_move_stage_allowed_with_permission(world):
+    _reset(world, jobs=[JOB_A], candidates=[CAND_A], assignments=[_assign({})])
+    out = run(world.cand_r.update_stage("cand-A", _ns(stage="Shortlisted", note=None), RECRUITER_A))
+    assert out["success"] is True
+
+
 # ===========================================================================
 # AI
 # ===========================================================================

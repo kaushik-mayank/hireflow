@@ -121,6 +121,15 @@ export default function CandidateDetail() {
   if (loading) return <Layout><Topbar title="Loading..." /><PageBody><Skeleton className="h-96 rounded-xl" /></PageBody></Layout>;
   if (!cand) return null;
 
+  // Effective permissions for the caller on this candidate's job (managers get
+  // all true; undefined defaults to allowed so legacy responses never lock out).
+  const perms = cand.effective_permissions || {};
+  const can = (flag) => perms[flag] !== false;
+  const canMove = can("can_move_stage");
+  const canReject = can("can_reject_candidates");
+  const canUseAI = can("can_use_ai");
+  const NO_PERM = "Your admin hasn't given you this permission on this job.";
+
   return (
     <Layout>
       <Topbar title="Candidate Profile" actions={<Button variant="ghost" onClick={() => navigate(`/jobs/${cand.job_id}`)}><ArrowLeft size={16} /> Back to Job</Button>} />
@@ -188,7 +197,7 @@ export default function CandidateDetail() {
                   <FileText size={16} /> Resume {cand.pdf_original_name && <span className="text-xs text-gray-400 font-normal">({cand.pdf_original_name})</span>}
                   {resumeOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </button>
-                <Button variant="secondary" className="!py-1.5 !px-3 !text-xs" onClick={openResumeView} data-testid="resume-formatted">
+                <Button variant="secondary" className="!py-1.5 !px-3 !text-xs" onClick={openResumeView} disabled={!canUseAI} title={canUseAI ? undefined : NO_PERM} data-testid="resume-formatted">
                   <LayoutTemplate size={14} /> Formatted view
                 </Button>
               </div>
@@ -225,26 +234,28 @@ export default function CandidateDetail() {
               <div className="text-xs font-semibold text-gray-600 uppercase mb-2">Current Stage</div>
               <StageBadge stage={cand.stage} className="!text-sm !px-3 !py-1" />
               <div className="grid grid-cols-2 gap-2 mt-4">
-                <Button variant="secondary" onClick={() => moveStage("Selected")} className="!text-xs" data-testid="action-select"><Send size={14} /> Select</Button>
-                <Button variant="secondary" onClick={() => moveStage("Rejected")} className="!text-xs" data-testid="action-reject"><XCircle size={14} /> Reject</Button>
-                <Button variant="secondary" onClick={() => moveStage("Interview Scheduled")} className="!text-xs">Schedule</Button>
-                <Button variant="secondary" onClick={() => moveStage("On Hold")} className="!text-xs">On Hold</Button>
+                <Button variant="secondary" onClick={() => moveStage("Selected")} disabled={!canMove} title={canMove ? undefined : NO_PERM} className="!text-xs" data-testid="action-select"><Send size={14} /> Select</Button>
+                <Button variant="secondary" onClick={() => moveStage("Rejected")} disabled={!canReject} title={canReject ? undefined : NO_PERM} className="!text-xs" data-testid="action-reject"><XCircle size={14} /> Reject</Button>
+                <Button variant="secondary" onClick={() => moveStage("Interview Scheduled")} disabled={!canMove} title={canMove ? undefined : NO_PERM} className="!text-xs">Schedule</Button>
+                <Button variant="secondary" onClick={() => moveStage("On Hold")} disabled={!canMove} title={canMove ? undefined : NO_PERM} className="!text-xs">On Hold</Button>
               </div>
-              <select onChange={(e) => e.target.value && moveStage(e.target.value)} value="" className="w-full mt-2 rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white" data-testid="stage-select">
-                <option value="" disabled>Move to other stage...</option>
+              <select onChange={(e) => e.target.value && moveStage(e.target.value)} value="" disabled={!canMove} title={canMove ? undefined : NO_PERM} className="w-full mt-2 rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white disabled:opacity-50 disabled:cursor-not-allowed" data-testid="stage-select">
+                <option value="" disabled>{canMove ? "Move to other stage..." : "Moving not enabled"}</option>
                 {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
+              {!canMove && <p className="text-xs text-gray-400 mt-2">Moving candidates isn't enabled for you on this job.</p>}
             </Card>
 
             <Card className="p-5">
               <div className="flex items-center gap-2 mb-3"><Sparkles size={16} className="text-amber" /><h3 className="font-semibold text-gray-800">AI Actions</h3></div>
               <div className="space-y-2">
-                <AIButton loading={loadingAction === "questions"} onClick={() => run("questions", () => aiApi.questions(id), (d) => setQuestions(d.questions))} className="w-full justify-start" data-testid="ai-questions"><MessageSquareText size={15} /> Generate Screening Questions</AIButton>
-                <AIButton loading={loadingAction === "invite"} onClick={() => run("invite", () => aiApi.email(id, "interview invite"), setEmail)} className="w-full justify-start" data-testid="ai-invite"><Send size={15} /> Draft Interview Invite</AIButton>
-                <AIButton loading={loadingAction === "reject"} onClick={() => run("reject", () => aiApi.email(id, "rejection"), setEmail)} className="w-full justify-start" data-testid="ai-reject-email"><XCircle size={15} /> Draft Rejection Email</AIButton>
-                <AIButton loading={loadingAction === "summary"} onClick={() => run("summary", () => aiApi.summary(id), setSummary)} className="w-full justify-start" data-testid="ai-summary"><FileText size={15} /> Deep Candidate Summary</AIButton>
-                <AIButton loading={loadingAction === "compare"} onClick={() => setCompareModal(true)} disabled={siblings.length === 0} className="w-full justify-start" data-testid="ai-compare"><GitCompare size={15} /> Compare with Another</AIButton>
+                <AIButton loading={loadingAction === "questions"} onClick={() => run("questions", () => aiApi.questions(id), (d) => setQuestions(d.questions))} disabled={!canUseAI} title={canUseAI ? undefined : NO_PERM} className="w-full justify-start" data-testid="ai-questions"><MessageSquareText size={15} /> Generate Screening Questions</AIButton>
+                <AIButton loading={loadingAction === "invite"} onClick={() => run("invite", () => aiApi.email(id, "interview invite"), setEmail)} disabled={!canUseAI} title={canUseAI ? undefined : NO_PERM} className="w-full justify-start" data-testid="ai-invite"><Send size={15} /> Draft Interview Invite</AIButton>
+                <AIButton loading={loadingAction === "reject"} onClick={() => run("reject", () => aiApi.email(id, "rejection"), setEmail)} disabled={!canUseAI} title={canUseAI ? undefined : NO_PERM} className="w-full justify-start" data-testid="ai-reject-email"><XCircle size={15} /> Draft Rejection Email</AIButton>
+                <AIButton loading={loadingAction === "summary"} onClick={() => run("summary", () => aiApi.summary(id), setSummary)} disabled={!canUseAI} title={canUseAI ? undefined : NO_PERM} className="w-full justify-start" data-testid="ai-summary"><FileText size={15} /> Deep Candidate Summary</AIButton>
+                <AIButton loading={loadingAction === "compare"} onClick={() => setCompareModal(true)} disabled={!canUseAI || siblings.length === 0} title={canUseAI ? undefined : NO_PERM} className="w-full justify-start" data-testid="ai-compare"><GitCompare size={15} /> Compare with Another</AIButton>
               </div>
+              {!canUseAI && <p className="text-xs text-gray-400 mt-2">AI tools aren't enabled for you on this job.</p>}
             </Card>
 
             <Card className="p-5">

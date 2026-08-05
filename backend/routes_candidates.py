@@ -57,6 +57,7 @@ async def upload_resumes(
     user: dict = Depends(get_current_user),
 ):
     access = await permissions.resolve_job_access(user, job_id)
+    permissions.require_permission(access, "can_upload_candidates")
 
     # Source is mandatory (the UI enforces it too); reject a blank value.
     clean_source = (source or "").strip()
@@ -142,6 +143,10 @@ async def get_candidate(candidate_id: str, user: dict = Depends(get_current_user
     ).sort("moved_at", -1).to_list(500)
     cand["job"] = {"id": job["id"], "title": job["title"], "department": job.get("department")}
     cand["transitions"] = transitions
+    # The caller's effective permissions on this candidate's job, so the UI can
+    # disable controls the recruiter isn't allowed to use (managers get all true).
+    cand["effective_permissions"] = access.permissions
+    cand["access_scope"] = access.scope
     return cand
 
 
@@ -173,6 +178,10 @@ async def update_stage(candidate_id: str, body: StageUpdate, user: dict = Depend
     if body.stage not in STAGES:
         raise HTTPException(status_code=400, detail="Invalid stage")
     cand, access = await permissions.resolve_candidate_access(user, candidate_id)
+    # Rejecting is a separate, more sensitive permission from an ordinary move.
+    permissions.require_permission(
+        access, "can_reject_candidates" if body.stage == "Rejected" else "can_move_stage"
+    )
     await _move_stage(cand, body.stage, body.note, user)
 
     job = access.job
@@ -220,6 +229,11 @@ async def bulk_update_stage(body: BulkStageUpdate, user: dict = Depends(get_curr
         if (access.scope == "assigned"
                 and not access.can("can_view_team_candidates")
                 and c.get("sourced_by") != user["id"]):
+            continue
+        # Same permission gate as a single move: skip (don't fail the batch)
+        # candidates on jobs where the caller can't make this move.
+        move_flag = "can_reject_candidates" if body.stage == "Rejected" else "can_move_stage"
+        if not access.can(move_flag):
             continue
         movable.append(c)
     if not movable:
