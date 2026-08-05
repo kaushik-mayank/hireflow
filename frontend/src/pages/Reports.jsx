@@ -14,6 +14,7 @@ import { Card, ProgressBar, Skeleton, EmptyState, Pill } from "@/components/ui";
 import { STAGE_COLORS } from "@/constants";
 import { useAuth } from "@/context/AuthContext";
 import TeamReport from "@/components/TeamReport";
+import MyProgress from "@/components/MyProgress";
 
 const tooltipStyle = {
   borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12,
@@ -262,6 +263,7 @@ export default function Reports() {
     <Layout>
       <Topbar title="Reports" subtitle="Hiring performance & pipeline analytics" actions={toggle} />
       <PageBody>
+        {!isManager && <MyProgress />}
         <HeadlineStats totals={totals} tth={tth} />
         <Insights insights={insights} />
 

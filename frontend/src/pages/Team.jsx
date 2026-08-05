@@ -155,6 +155,47 @@ function AddUserModal({ open, onClose, onDone }) {
   );
 }
 
+function RemoveModal({ target, recruiters, onClose, onDone }) {
+  const [reassignTo, setReassignTo] = useState("");
+  const [saving, setSaving] = useState(false);
+  if (!target) return null;
+  const options = recruiters.filter((r) => r.id !== target.id && r.status === "active");
+
+  const confirm = async () => {
+    setSaving(true);
+    try {
+      await orgsApi.removeMember(target.id, reassignTo || null);
+      toast.success(`${target.name || target.email} removed`);
+      onDone();
+      onClose();
+    } catch (err) {
+      toast.error(apiErr(err, "Couldn't remove that member."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open onClose={onClose} title={`Remove ${target.name || target.email}`} width="max-w-md"
+      footer={<>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="danger" onClick={confirm} disabled={saving} data-testid="remove-confirm">{saving ? "Removing…" : "Remove member"}</Button>
+      </>}
+    >
+      <p className="text-sm text-gray-600 leading-relaxed">
+        They'll lose access immediately. Choose who should take over their open jobs and the candidates they added —
+        nothing is deleted.
+      </p>
+      <label className="text-sm font-medium text-gray-700 mt-4 block">Reassign their work to</label>
+      <select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)} className="mt-1.5 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm bg-white outline-none focus:border-indigo" data-testid="remove-reassign">
+        <option value="">Leave unassigned (keep attributed to them)</option>
+        {options.map((r) => <option key={r.id} value={r.id}>{r.name || r.email}</option>)}
+      </select>
+    </Modal>
+  );
+}
+
 export default function Team() {
   const { user } = useAuth();
   const [org, setOrg] = useState(null);
@@ -162,6 +203,7 @@ export default function Team() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -187,7 +229,7 @@ export default function Team() {
     } catch (err) { toast.error(apiErr(err)); }
   };
 
-  const remove = async (m) => {
+  const removePending = async (m) => {
     if (!window.confirm(`Remove ${m.email}? They haven't signed in yet, so this just frees their seat.`)) return;
     try {
       await orgsApi.removeMember(m.id);
@@ -196,25 +238,37 @@ export default function Team() {
     } catch (err) { toast.error(apiErr(err)); }
   };
 
+  const removeBtn = (m) => (
+    <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => setRemoveTarget(m)} title="Remove" data-testid={`remove-${m.id}`}>
+      <Trash2 size={15} className="text-gray-400" />
+    </Button>
+  );
+
   const rowActions = (m) => {
     if (m.id === user?.id) return <span className="text-xs text-gray-400">You</span>;
     if (m.status === "active") {
       return (
-        <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => setStatus(m, "disabled")} title="Suspend" data-testid={`suspend-${m.id}`}>
-          <ShieldOff size={15} className="text-coral" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => setStatus(m, "disabled")} title="Suspend" data-testid={`suspend-${m.id}`}>
+            <ShieldOff size={15} className="text-coral" />
+          </Button>
+          {removeBtn(m)}
+        </div>
       );
     }
     if (m.status === "disabled") {
       return (
-        <Button variant="secondary" className="!px-2 !py-1.5" onClick={() => setStatus(m, "active")} title="Reactivate" data-testid={`reactivate-${m.id}`}>
-          <ShieldCheck size={15} className="text-green" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button variant="secondary" className="!px-2 !py-1.5" onClick={() => setStatus(m, "active")} title="Reactivate" data-testid={`reactivate-${m.id}`}>
+            <ShieldCheck size={15} className="text-green" />
+          </Button>
+          {removeBtn(m)}
+        </div>
       );
     }
-    // approved / invited — not yet signed in; removing frees the seat.
+    // approved / invited — not yet signed in; removing just frees the seat.
     return (
-      <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => remove(m)} title="Remove" data-testid={`remove-${m.id}`}>
+      <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => removePending(m)} title="Remove" data-testid={`remove-${m.id}`}>
         <Trash2 size={15} className="text-gray-400" />
       </Button>
     );
@@ -316,6 +370,14 @@ export default function Team() {
       </PageBody>
 
       <AddUserModal open={showAdd} onClose={() => setShowAdd(false)} onDone={load} />
+      {removeTarget && (
+        <RemoveModal
+          target={removeTarget}
+          recruiters={members.filter((m) => m.org_role === "recruiter")}
+          onClose={() => setRemoveTarget(null)}
+          onDone={load}
+        />
+      )}
     </Layout>
   );
 }

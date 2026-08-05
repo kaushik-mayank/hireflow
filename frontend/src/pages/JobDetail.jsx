@@ -358,6 +358,11 @@ export default function JobDetail() {
 
         {tab === "jd" && (
           <Card className="p-6">
+            {isAssigned && isPersonalJd && job.jd_org_updated && (
+              <div className="mb-4 flex items-start gap-2.5 rounded-lg bg-amber-light/60 px-4 py-3 text-sm text-[#92400e]" data-testid="jd-updated-notice">
+                <span>Your admin updated the shared job description after you made your version. Your AI still uses your version — reset to the team version below if you want their latest.</span>
+              </div>
+            )}
             {isAssigned && (
               <div className="flex flex-wrap items-center gap-2 mb-4">
                 <Pill tone={isPersonalJd ? "amber" : "gray"}>{isPersonalJd ? "Your version" : "Team version"}</Pill>

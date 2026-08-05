@@ -26,6 +26,7 @@ const DEFAULT_PERMS = {
 function AssignModal({ open, onClose, jobId, recruiters, existing, onSaved }) {
   const editing = Boolean(existing);
   const [userId, setUserId] = useState("");
+  const [userIds, setUserIds] = useState([]);  // new mode: assign several at once
   const [perms, setPerms] = useState(DEFAULT_PERMS);
   const [targets, setTargets] = useState({ shortlist_target: "", sourced_target: "", interview_target: "" });
   const [deadline, setDeadline] = useState("");
@@ -48,6 +49,7 @@ function AssignModal({ open, onClose, jobId, recruiters, existing, onSaved }) {
       setNote(existing.note || "");
     } else {
       setUserId("");
+      setUserIds([]);
       setPerms(DEFAULT_PERMS);
       setTargets({ shortlist_target: "", sourced_target: "", interview_target: "" });
       setDeadline("");
@@ -56,21 +58,28 @@ function AssignModal({ open, onClose, jobId, recruiters, existing, onSaved }) {
   }, [open, existing]);
 
   const num = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
+  const toggleUser = (id) => setUserIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const save = async () => {
-    if (!userId) { toast.error("Choose a teammate to assign"); return; }
+    const common = {
+      permissions: perms,
+      shortlist_target: num(targets.shortlist_target),
+      sourced_target: num(targets.sourced_target),
+      interview_target: num(targets.interview_target),
+      deadline: deadline || null,
+      note: note || null,
+    };
     setSaving(true);
     try {
-      await assignmentsApi.upsert(jobId, {
-        user_id: userId,
-        permissions: perms,
-        shortlist_target: num(targets.shortlist_target),
-        sourced_target: num(targets.sourced_target),
-        interview_target: num(targets.interview_target),
-        deadline: deadline || null,
-        note: note || null,
-      });
-      toast.success(editing ? "Assignment updated" : "Teammate assigned");
+      if (editing) {
+        await assignmentsApi.upsert(jobId, { user_id: userId, ...common });
+        toast.success("Assignment updated");
+      } else {
+        if (!userIds.length) { toast.error("Choose at least one teammate to assign"); setSaving(false); return; }
+        const res = await assignmentsApi.bulkUpsert(jobId, { user_ids: userIds, ...common });
+        const n = res.data.assigned?.length || 0;
+        toast.success(`Assigned ${n} teammate${n === 1 ? "" : "s"}`);
+      }
       onSaved();
       onClose();
     } catch (err) {
@@ -89,24 +98,26 @@ function AssignModal({ open, onClose, jobId, recruiters, existing, onSaved }) {
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={saving || !userId} data-testid="assign-save">
-            {saving ? "Saving…" : editing ? "Save changes" : "Assign"}
+          <Button onClick={save} disabled={saving || (editing ? false : !userIds.length)} data-testid="assign-save">
+            {saving ? "Saving…" : editing ? "Save changes" : `Assign${userIds.length ? ` (${userIds.length})` : ""}`}
           </Button>
         </>
       }
     >
       {!editing && (
         <div className="mb-4">
-          <label className="text-sm font-medium text-gray-700">Teammate</label>
-          <select
-            value={userId} onChange={(e) => setUserId(e.target.value)}
-            className="mt-1.5 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm bg-white outline-none focus:border-indigo focus:ring-2 focus:ring-indigo/20"
-            data-testid="assign-user"
-          >
-            <option value="" disabled>Select a teammate…</option>
-            {recruiters.map((m) => <option key={m.id} value={m.id}>{(m.name || m.email)} · {m.email}</option>)}
-          </select>
-          {recruiters.length === 0 && (
+          <label className="text-sm font-medium text-gray-700">Teammates <span className="text-gray-400 font-normal">(pick one or more)</span></label>
+          {recruiters.length ? (
+            <div className="mt-1.5 max-h-40 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-100" data-testid="assign-user-list">
+              {recruiters.map((m) => (
+                <label key={m.id} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50">
+                  <input type="checkbox" checked={userIds.includes(m.id)} onChange={() => toggleUser(m.id)} className="accent-indigo w-4 h-4" data-testid={`assign-user-${m.id}`} />
+                  <span className="font-medium">{m.name || m.email}</span>
+                  <span className="text-gray-400">· {m.email}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
             <p className="text-xs text-gray-400 mt-1">No teammates yet — add them from the Team page first.</p>
           )}
         </div>

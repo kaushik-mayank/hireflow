@@ -55,13 +55,15 @@ export const orgsApi = {
   addMember: (data) => client.post("/orgs/members", data),
   addMembersBulk: (text) => client.post("/orgs/members/bulk", { text }),
   setMemberStatus: (id, status) => client.patch(`/orgs/members/${id}`, { status }),
-  removeMember: (id) => client.delete(`/orgs/members/${id}`),
+  // reassign_to: another recruiter's id (or null to leave work unassigned).
+  removeMember: (id, reassign_to = null) => client.delete(`/orgs/members/${id}`, { data: { reassign_to } }),
 };
 
 // ---- Assignments & personal JD override (Cycle 2) ----
 export const assignmentsApi = {
   listForJob: (jobId) => client.get(`/jobs/${jobId}/assignments`),
   upsert: (jobId, data) => client.post(`/jobs/${jobId}/assignments`, data),
+  bulkUpsert: (jobId, data) => client.post(`/jobs/${jobId}/assignments/bulk`, data),
   revoke: (jobId, userId) => client.delete(`/jobs/${jobId}/assignments/${userId}`),
   mine: () => client.get("/assignments/mine"),
   setJdOverride: (jobId, data) => client.put(`/jobs/${jobId}/jd-override`, data),
@@ -125,8 +127,15 @@ export const adminApi = {
 // ---- Reports ----
 export const reportsApi = {
   get: () => client.get("/reports"),
-  // Manager-only per-recruiter team report.
-  team: () => client.get("/reports/team"),
+  // Manager-only per-recruiter team report (optional date-range window).
+  team: (rangeDays) => client.get("/reports/team", { params: rangeDays ? { range_days: rangeDays } : {} }),
+  // Blob download (goes through the auth interceptor, unlike a bare <a href>).
+  teamCsv: (panel, rangeDays) => client.get("/reports/team/export.csv", {
+    params: { panel, ...(rangeDays ? { range_days: rangeDays } : {}) },
+    responseType: "blob",
+  }),
+  // A recruiter's own assignment-centric report.
+  mine: (rangeDays) => client.get("/reports/mine", { params: rangeDays ? { range_days: rangeDays } : {} }),
 };
 
 // ---- Feedback / Support ----
