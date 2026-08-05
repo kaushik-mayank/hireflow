@@ -58,6 +58,13 @@ class MemberStatusUpdate(BaseModel):
     status: str  # "active" (reactivate) | "disabled" (suspend)
 
 
+class MemberRemove(BaseModel):
+    """Remove an active member, reassigning their work first so nothing is
+    orphaned. `reassign_to` is another recruiter's id, or null to leave their
+    jobs unassigned and their candidates attributed to them."""
+    reassign_to: Optional[str] = None
+
+
 class AssignmentUpsert(BaseModel):
     """A manager assigns a job to a recruiter with per-assignment permissions,
     targets and a deadline. Idempotent on (job, user): sending it again edits the
@@ -71,6 +78,19 @@ class AssignmentUpsert(BaseModel):
     deadline: Optional[str] = None
     note: Optional[str] = None
     status: Optional[str] = None  # "active" | "paused"
+
+
+class BulkAssignmentUpsert(BaseModel):
+    """Assign one job to several recruiters at once with the same permissions,
+    targets and deadline. Idempotent per (job, user), like the single upsert."""
+    user_ids: List[str]
+    permissions: Optional[dict] = None
+    shortlist_target: Optional[int] = None
+    sourced_target: Optional[int] = None
+    interview_target: Optional[int] = None
+    deadline: Optional[str] = None
+    note: Optional[str] = None
+    status: Optional[str] = None
 
 
 class JDOverrideUpdate(BaseModel):

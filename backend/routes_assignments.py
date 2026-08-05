@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from database import jobs, users, job_assignments, job_jd_overrides, activity_events
 from auth import get_current_user
-from models import AssignmentUpsert, JDOverrideUpdate
+from models import AssignmentUpsert, BulkAssignmentUpsert, JDOverrideUpdate
 import permissions
 
 router = APIRouter(prefix="/jobs", tags=["assignments"])
@@ -68,61 +68,84 @@ def _assignment_view(a: dict, member: dict | None) -> dict:
 # Assignments (manager)
 # ---------------------------------------------------------------------------
 
-@router.post("/{job_id}/assignments")
-async def upsert_assignment(job_id: str, body: AssignmentUpsert, user: dict = Depends(permissions.require_manager)):
-    """Assign a job to a recruiter, or edit the existing assignment. Idempotent
-    on (job, user) — sending it twice updates rather than duplicates."""
-    org_id = user["org_id"]
-    await _manager_job_or_404(job_id, org_id)
-
-    member = await users.find_one({"id": body.user_id, "org_id": org_id}, {"_id": 0})
+async def _validate_assignee(user_id: str, org_id: str) -> dict:
+    """The teammate must exist in the org, be a recruiter, and be active/approved.
+    Returns the member doc or raises the right HTTP error."""
+    member = await users.find_one({"id": user_id, "org_id": org_id}, {"_id": 0})
     if not member:
         raise HTTPException(status_code=404, detail="Teammate not found")
     if member.get("org_role") == permissions.MANAGER:
         raise HTTPException(status_code=400, detail="Admins already have access to every job.")
     if member.get("status") not in ("approved", "active"):
         raise HTTPException(status_code=400, detail="You can only assign jobs to active teammates.")
+    return member
 
-    perms = {**permissions.DEFAULT_PERMISSIONS, **permissions.sanitize_permissions(body.permissions)}
-    status = body.status if body.status in ACTIVE_ASSIGNMENT_STATUSES else "active"
+
+async def _write_assignment(org_id, job_id, actor_id, user_id, perms, targets, deadline, note, status):
+    """Idempotent upsert of one (job, user) assignment + its activity event."""
     now = _now_iso()
-
-    existing = await job_assignments.find_one({"job_id": job_id, "user_id": body.user_id}, {"_id": 0})
+    existing = await job_assignments.find_one({"job_id": job_id, "user_id": user_id}, {"_id": 0})
     if existing:
         updates = {
-            "permissions": perms,
-            "targets": _targets_from(body),
-            "deadline": body.deadline,
-            "note": body.note,
-            "status": status,
-            "updated_at": now,
-            "org_id": org_id,  # heal any older row missing it
+            "permissions": perms, "targets": targets, "deadline": deadline, "note": note,
+            "status": status, "updated_at": now, "org_id": org_id,
         }
         await job_assignments.update_one({"id": existing["id"]}, {"$set": updates})
         assignment = {**existing, **updates}
     else:
         assignment = {
-            "id": str(uuid.uuid4()),
-            "org_id": org_id,
-            "job_id": job_id,
-            "user_id": body.user_id,
-            "assigned_by": user["id"],
-            "status": status,
-            "permissions": perms,
-            "targets": _targets_from(body),
-            "deadline": body.deadline,
-            "note": body.note,
-            "assigned_at": now,
-            "updated_at": now,
+            "id": str(uuid.uuid4()), "org_id": org_id, "job_id": job_id, "user_id": user_id,
+            "assigned_by": actor_id, "status": status, "permissions": perms, "targets": targets,
+            "deadline": deadline, "note": note, "assigned_at": now, "updated_at": now,
         }
         await job_assignments.insert_one(dict(assignment))
-
     await activity_events.insert_one({
-        "id": str(uuid.uuid4()), "org_id": org_id, "actor_id": user["id"],
+        "id": str(uuid.uuid4()), "org_id": org_id, "actor_id": actor_id,
         "job_id": job_id, "candidate_id": None, "type": "job_assigned",
-        "meta": {"user_id": body.user_id}, "created_at": now,
+        "meta": {"user_id": user_id}, "created_at": now,
     })
+    return assignment
+
+
+@router.post("/{job_id}/assignments")
+async def upsert_assignment(job_id: str, body: AssignmentUpsert, user: dict = Depends(permissions.require_manager)):
+    """Assign a job to a recruiter, or edit the existing assignment. Idempotent
+    on (job, user) — sending it twice updates rather than duplicates."""
+    org_id = user["org_id"]
+    await _manager_job_or_404(job_id, org_id)
+    member = await _validate_assignee(body.user_id, org_id)
+    perms = {**permissions.DEFAULT_PERMISSIONS, **permissions.sanitize_permissions(body.permissions)}
+    status = body.status if body.status in ACTIVE_ASSIGNMENT_STATUSES else "active"
+    assignment = await _write_assignment(
+        org_id, job_id, user["id"], body.user_id, perms, _targets_from(body),
+        body.deadline, body.note, status,
+    )
     return _assignment_view(assignment, member)
+
+
+@router.post("/{job_id}/assignments/bulk")
+async def bulk_upsert_assignments(job_id: str, body: BulkAssignmentUpsert, user: dict = Depends(permissions.require_manager)):
+    """Assign one job to several recruiters with the same settings. Invalid or
+    ineligible ids are skipped-with-reason rather than failing the whole batch."""
+    org_id = user["org_id"]
+    await _manager_job_or_404(job_id, org_id)
+    perms = {**permissions.DEFAULT_PERMISSIONS, **permissions.sanitize_permissions(body.permissions)}
+    status = body.status if body.status in ACTIVE_ASSIGNMENT_STATUSES else "active"
+    targets = {
+        "shortlist_target": body.shortlist_target,
+        "sourced_target": body.sourced_target,
+        "interview_target": body.interview_target,
+    }
+    assigned, skipped = [], []
+    for uid in dict.fromkeys(body.user_ids):  # de-dupe, keep order
+        try:
+            member = await _validate_assignee(uid, org_id)
+        except HTTPException as exc:
+            skipped.append({"user_id": uid, "reason": exc.detail})
+            continue
+        a = await _write_assignment(org_id, job_id, user["id"], uid, perms, targets, body.deadline, body.note, status)
+        assigned.append(_assignment_view(a, member))
+    return {"assigned": assigned, "skipped": skipped}
 
 
 @router.get("/{job_id}/assignments")

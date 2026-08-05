@@ -119,6 +119,16 @@ async def get_job(job_id: str, user: dict = Depends(get_current_user)):
     job["jd_source"] = jd["jd_source"]
     job["effective_permissions"] = access.permissions
     job["access_scope"] = access.scope
+    # Notice for a recruiter whose personal JD override predates the admin's last
+    # edit of the shared JD — "the admin updated the job description" (§12).
+    job["jd_org_updated"] = False
+    if jd["jd_source"] == "personal":
+        ov = await job_jd_overrides.find_one(
+            {"job_id": job_id, "user_id": user["id"]}, {"_id": 0, "updated_at": 1}
+        )
+        jd_updated_at = access.job.get("jd_updated_at")
+        if ov and jd_updated_at and ov.get("updated_at") and ov["updated_at"] < jd_updated_at:
+            job["jd_org_updated"] = True
     return await _job_stats(job)
 
 
@@ -146,6 +156,10 @@ async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_curr
     if "openings_needed" in updates and updates["openings_needed"] is not None and updates["openings_needed"] < 1:
         raise HTTPException(status_code=400, detail="Openings must be at least 1")
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    # Track JD edits separately so a recruiter's stale personal override can be
+    # detected without any non-JD edit tripping the "admin updated the JD" notice.
+    if "jd_text" in updates or "jd_enhanced" in updates:
+        updates["jd_updated_at"] = updates["updated_at"]
     await jobs.update_one({"id": job_id}, {"$set": updates})
     job.update(updates)
     return await _job_stats(job)

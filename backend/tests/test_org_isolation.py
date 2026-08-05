@@ -263,6 +263,33 @@ def test_list_jobs_manager_has_no_assignment_fields(world):
     assert "my_deadline" not in rows[0]  # managers see org jobs, no personal assignment
 
 
+def test_get_job_flags_stale_personal_jd(world):
+    _reset(
+        world,
+        jobs=[{**JOB_A, "jd_updated_at": "2026-02-01T00:00:00+00:00"}],
+        assignments=[{"id": "as1", "org_id": "org-A", "job_id": "job-A", "user_id": "rec-A",
+                      "status": "active", "permissions": {"can_edit_jd": True}}],
+        overrides=[{"id": "o1", "job_id": "job-A", "user_id": "rec-A", "jd_text": "mine",
+                    "updated_at": "2026-01-01T00:00:00+00:00"}],  # older than the org edit
+    )
+    out = run(world.jobs_r.get_job("job-A", RECRUITER_A))
+    assert out["jd_source"] == "personal"
+    assert out["jd_org_updated"] is True
+
+
+def test_get_job_personal_jd_not_stale_when_newer(world):
+    _reset(
+        world,
+        jobs=[{**JOB_A, "jd_updated_at": "2026-01-01T00:00:00+00:00"}],
+        assignments=[{"id": "as1", "org_id": "org-A", "job_id": "job-A", "user_id": "rec-A",
+                      "status": "active", "permissions": {"can_edit_jd": True}}],
+        overrides=[{"id": "o1", "job_id": "job-A", "user_id": "rec-A", "jd_text": "mine",
+                    "updated_at": "2026-03-01T00:00:00+00:00"}],  # newer than the org edit
+    )
+    out = run(world.jobs_r.get_job("job-A", RECRUITER_A))
+    assert out["jd_org_updated"] is False
+
+
 # ===========================================================================
 # Candidates
 # ===========================================================================

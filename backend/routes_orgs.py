@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from database import users, organizations, job_assignments, candidates
 from admin_identity import HR_ROLE
-from models import MemberCreate, BulkMemberCreate, MemberStatusUpdate
+from models import MemberCreate, BulkMemberCreate, MemberStatusUpdate, MemberRemove
 import permissions
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
@@ -231,22 +231,68 @@ async def update_member(member_id: str, body: MemberStatusUpdate, user: dict = D
 
 
 @router.delete("/members/{member_id}")
-async def remove_member(member_id: str, user: dict = Depends(permissions.require_manager)):
-    """Remove an approved email that hasn't been used to sign in yet, freeing the
-    seat. Removing an already-active member (with reassignment of their jobs and
-    candidates) arrives in a later update — for now, suspend them instead."""
+async def remove_member(member_id: str, body: MemberRemove = MemberRemove(), user: dict = Depends(permissions.require_manager)):
+    """Remove a member. A never-signed-in approval is simply deleted (frees the
+    seat). An active member's work is **reassigned first** so nothing is orphaned:
+    their active assignments move to `reassign_to` (or are revoked if null) and
+    their sourced candidates are re-attributed; then the member is disabled."""
+    org_id = user["org_id"]
     if member_id == user["id"]:
         raise HTTPException(status_code=400, detail="You can't remove yourself.")
-    target = await users.find_one({"id": member_id, "org_id": user["org_id"]}, {"_id": 0})
+    target = await users.find_one({"id": member_id, "org_id": org_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Member not found")
-    if target.get("status") not in PENDING_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail="This member has already joined — suspend them instead. Removing active members arrives in a later update.",
+
+    # Never-activated approval: drop it, freeing the seat.
+    if target.get("status") in PENDING_STATUSES:
+        await users.delete_one({"id": member_id})
+        return {"success": True, "removed": True}
+
+    # An org must always keep at least one active admin.
+    if target.get("org_role") == "manager":
+        active_mgrs = await users.count_documents(
+            {"org_id": org_id, "org_role": "manager", "status": "active"}
         )
-    await users.delete_one({"id": member_id})
-    return {"success": True}
+        if active_mgrs <= 1:
+            raise HTTPException(status_code=409, detail="An organisation must have at least one active admin.")
+
+    reassign_to = body.reassign_to
+    if reassign_to:
+        dest = await users.find_one({"id": reassign_to, "org_id": org_id}, {"_id": 0})
+        if not dest or dest.get("org_role") != "recruiter" or dest.get("status") != "active" or reassign_to == member_id:
+            raise HTTPException(status_code=400, detail="Choose an active teammate to receive the reassigned work.")
+
+    now = _now().isoformat()
+    # Move (or revoke) each active assignment.
+    async for a in job_assignments.find(
+        {"org_id": org_id, "user_id": member_id, "status": "active"}, {"_id": 0}
+    ):
+        if reassign_to:
+            existing = await job_assignments.find_one(
+                {"job_id": a["job_id"], "user_id": reassign_to}, {"_id": 0}
+            )
+            if existing:
+                await job_assignments.update_one(
+                    {"id": existing["id"]}, {"$set": {"status": "active", "updated_at": now}}
+                )
+            else:
+                await job_assignments.insert_one({
+                    "id": str(uuid.uuid4()), "org_id": org_id, "job_id": a["job_id"],
+                    "user_id": reassign_to, "assigned_by": user["id"], "status": "active",
+                    "permissions": a.get("permissions", {}), "targets": a.get("targets", {}),
+                    "deadline": a.get("deadline"), "note": a.get("note"),
+                    "assigned_at": now, "updated_at": now,
+                })
+        await job_assignments.update_one({"id": a["id"]}, {"$set": {"status": "revoked", "updated_at": now}})
+
+    # Re-attribute their sourced candidates so team reports stay coherent.
+    if reassign_to:
+        await candidates.update_many(
+            {"org_id": org_id, "sourced_by": member_id}, {"$set": {"sourced_by": reassign_to}}
+        )
+
+    await users.update_one({"id": member_id}, {"$set": {"status": "disabled", "removed_at": now}})
+    return {"success": True, "removed": True, "reassigned_to": reassign_to}
 
 
 # ---------------------------------------------------------------------------

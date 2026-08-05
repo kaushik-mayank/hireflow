@@ -82,6 +82,11 @@ class FakeColl:
                 d.update(update.get("$set", {}))
                 return
 
+    async def update_many(self, query, update):
+        for d in self.docs:
+            if _matches(d, query):
+                d.update(update.get("$set", {}))
+
     async def delete_one(self, query):
         for i, d in enumerate(self.docs):
             if _matches(d, query):
@@ -175,7 +180,7 @@ def world():
                 FirebaseAuthError=_FirebaseAuthError)
 
     for mdl in ("SignupRequest", "LoginRequest", "FirebaseAuthRequest", "OnboardingCheck",
-                "MemberCreate", "BulkMemberCreate", "MemberStatusUpdate"):
+                "MemberCreate", "BulkMemberCreate", "MemberStatusUpdate", "MemberRemove"):
         _merge_stub("models", **{mdl: object})
 
     sys.modules.pop("auth", None)
@@ -289,22 +294,42 @@ def test_list_members_includes_approved_and_active(world):
 
 def test_remove_approved_member_frees_seat(world):
     _seed(world, users=[MANAGER, _approved()])
-    out = run(world.orgs.remove_member("u-rue", MANAGER))
+    out = run(world.orgs.remove_member("u-rue", _ns(reassign_to=None), MANAGER))
     assert out["success"] is True
     assert not any(u["id"] == "u-rue" for u in world.colls["users"].docs)
 
 
-def test_remove_active_member_is_409(world):
+def test_remove_active_member_reassigns_and_disables(world):
+    dest = {"id": "u-dest", "org_id": "org-A", "org_role": "recruiter", "status": "active",
+            "name": "Dana", "email": "dana@alpha.com"}
+    _seed(world, users=[MANAGER, {**_approved(), "status": "active"}, dest])
+    world.colls["job_assignments"].docs = [
+        {"id": "as1", "org_id": "org-A", "job_id": "job-1", "user_id": "u-rue", "status": "active",
+         "permissions": {"can_edit_jd": True}, "targets": {}},
+    ]
+    world.colls["candidates"].docs = [
+        {"id": "c1", "org_id": "org-A", "job_id": "job-1", "sourced_by": "u-rue", "stage": "Applied"},
+    ]
+    out = run(world.orgs.remove_member("u-rue", _ns(reassign_to="u-dest"), MANAGER))
+    assert out["reassigned_to"] == "u-dest"
+    # Member disabled, their assignment revoked, dest now assigned, candidate moved.
+    assert next(u for u in world.colls["users"].docs if u["id"] == "u-rue")["status"] == "disabled"
+    assert next(a for a in world.colls["job_assignments"].docs if a["user_id"] == "u-rue")["status"] == "revoked"
+    assert any(a["user_id"] == "u-dest" and a["status"] == "active" for a in world.colls["job_assignments"].docs)
+    assert world.colls["candidates"].docs[0]["sourced_by"] == "u-dest"
+
+
+def test_remove_active_member_bad_reassign_target_400(world):
     _seed(world, users=[MANAGER, {**_approved(), "status": "active"}])
     with pytest.raises(world.exc) as e:
-        run(world.orgs.remove_member("u-rue", MANAGER))
-    assert e.value.status_code == 409
+        run(world.orgs.remove_member("u-rue", _ns(reassign_to="ghost"), MANAGER))
+    assert e.value.status_code == 400
 
 
 def test_remove_cross_org_is_404(world):
     _seed(world, users=[MANAGER, {**_approved(), "org_id": "org-B"}])
     with pytest.raises(world.exc) as e:
-        run(world.orgs.remove_member("u-rue", MANAGER))
+        run(world.orgs.remove_member("u-rue", _ns(reassign_to=None), MANAGER))
     assert e.value.status_code == 404
 
 

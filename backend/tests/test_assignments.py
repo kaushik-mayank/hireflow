@@ -117,7 +117,7 @@ def world():
     )}
     _merge_stub("database", **colls)
     _merge_stub("auth", get_current_user=lambda: None)
-    for mdl in ("AssignmentUpsert", "JDOverrideUpdate"):
+    for mdl in ("AssignmentUpsert", "BulkAssignmentUpsert", "JDOverrideUpdate"):
         _merge_stub("models", **{mdl: object})
 
     import permissions
@@ -196,6 +196,20 @@ def test_assign_cross_org_job_is_404(world):
     with pytest.raises(world.exc) as e:
         run(world.r.upsert_assignment("job-A", _body(), MANAGER_B))
     assert e.value.status_code == 404
+
+
+def test_bulk_assign_assigns_and_skips(world):
+    other = {"id": "rec-A2", "org_id": "org-A", "org_role": "recruiter", "status": "active", "name": "R2", "email": "r2@a.com"}
+    _seed(world, users=(MANAGER_A, REC_A, other))
+    body = types.SimpleNamespace(
+        user_ids=["rec-A", "rec-A2", "rec-A", "ghost"], permissions={"can_edit_jd": True},
+        shortlist_target=3, sourced_target=None, interview_target=None, deadline=None, note=None, status=None,
+    )
+    out = run(world.r.bulk_upsert_assignments("job-A", body, MANAGER_A))
+    assert {a["user_id"] for a in out["assigned"]} == {"rec-A", "rec-A2"}  # de-duped
+    assert any(s["user_id"] == "ghost" for s in out["skipped"])
+    assert len(world.colls["job_assignments"].docs) == 2
+    assert out["assigned"][0]["permissions"]["can_edit_jd"] is True
 
 
 def test_assign_unknown_member_is_404(world):
