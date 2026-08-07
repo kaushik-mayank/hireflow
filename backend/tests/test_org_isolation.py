@@ -29,8 +29,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 def _matches(doc, query):
     for k, v in query.items():
-        if isinstance(v, dict) and "$in" in v:
-            if doc.get(k) not in v["$in"]:
+        if k == "$or":
+            if not any(_matches(doc, sub) for sub in v):
+                return False
+            continue
+        if isinstance(v, dict):
+            if "$in" in v and doc.get(k) not in v["$in"]:
+                return False
+            if "$ne" in v and doc.get(k) == v["$ne"]:
+                return False
+            if not ("$in" in v or "$ne" in v) and doc.get(k) != v:
                 return False
         elif doc.get(k) != v:
             return False
@@ -79,6 +87,15 @@ class FakeColl:
 
     async def insert_one(self, doc):
         self.docs.append(dict(doc))
+
+    async def delete_one(self, query):
+        for i, d in enumerate(self.docs):
+            if _matches(d, query):
+                del self.docs[i]
+                return
+
+    async def delete_many(self, query):
+        self.docs = [d for d in self.docs if not _matches(d, query)]
 
 
 def _merge_stub(name, **attrs):
@@ -237,12 +254,60 @@ def test_list_jobs_recruiter_sees_only_assigned(world):
     assert {r["id"] for r in rows} == {"job-A"}  # not job-A2 (unassigned)
 
 
-def test_recruiter_cannot_create_job(world):
-    _reset(world, jobs=[JOB_A])
-    # require_manager is the dependency; call it directly to prove it blocks.
+def _job_body(**kw):
+    base = {"title": "Role", "department": None, "openings_needed": 1, "jd_text": None,
+            "jd_enhanced": None, "deadline": None, "status": "active", "hiring_for": None,
+            "custom_stages": None}
+    base.update(kw)
+    return _ns(**base)
+
+
+def test_manager_creates_org_job(world):
+    _reset(world, jobs=[])
+    out = run(world.jobs_r.create_job(_job_body(title="Nurse"), MANAGER_A))
+    assert out["origin"] == "org"
+
+
+def test_recruiter_creates_personal_job(world):
+    _reset(world, jobs=[])
+    out = run(world.jobs_r.create_job(_job_body(title="My side role"), RECRUITER_A))
+    assert out["origin"] == "personal" and out["created_by"] == "rec-A"
+
+
+def test_recruiter_sees_own_personal_job_but_manager_does_not(world):
+    personal = {"id": "job-p", "org_id": "org-A", "origin": "personal", "created_by": "rec-A",
+                "title": "Mine", "status": "active", "created_at": "2026-01-01T00:00:00+00:00"}
+    _reset(world, jobs=[JOB_A, personal])  # JOB_A is an org job
+    rec_rows = run(world.jobs_r.list_jobs(RECRUITER_A))     # no assignment on JOB_A
+    mgr_rows = run(world.jobs_r.list_jobs(MANAGER_A))
+    assert {r["id"] for r in rec_rows} == {"job-p"}          # sees only their personal job
+    assert "job-p" not in {r["id"] for r in mgr_rows}        # manager never sees it
+    assert "job-A" in {r["id"] for r in mgr_rows}
+
+
+def test_manager_cannot_open_recruiters_personal_job(world):
+    personal = {"id": "job-p", "org_id": "org-A", "origin": "personal", "created_by": "rec-A", "title": "Mine"}
+    _reset(world, jobs=[personal])
     with pytest.raises(world.exc) as e:
-        run(world.p.require_manager(RECRUITER_A))
-    assert e.value.status_code == 403
+        run(world.jobs_r.get_job("job-p", MANAGER_A))
+    assert e.value.status_code == 404
+
+
+class _UpdBody:
+    def __init__(self, **kw):
+        self._d = kw
+
+    def model_dump(self, exclude_unset=True):
+        return dict(self._d)
+
+
+def test_recruiter_can_edit_and_delete_own_personal_job(world):
+    personal = {"id": "job-p", "org_id": "org-A", "origin": "personal", "created_by": "rec-A",
+                "title": "Mine", "status": "active"}
+    _reset(world, jobs=[personal])
+    out = run(world.jobs_r.update_job("job-p", _UpdBody(title="Renamed"), RECRUITER_A))
+    assert out["title"] == "Renamed"
+    assert run(world.jobs_r.delete_job("job-p", RECRUITER_A))["success"] is True
 
 
 def test_list_jobs_recruiter_gets_assignment_deadline_on_card(world):

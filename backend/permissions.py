@@ -118,6 +118,14 @@ async def resolve_job_access(user: dict, job_id: str) -> JobAccess:
     if not job:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
 
+    # A personal job (a recruiter's own) is visible ONLY to its creator, who has
+    # full control over it. Not even the org's manager can see someone else's.
+    if job.get("origin") == "personal":
+        if job.get("created_by") == user["id"]:
+            return JobAccess(job=job, assignment=None, permissions=dict(MANAGER_PERMISSIONS),
+                             scope="owner", org_id=org_id)
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+
     if is_manager(user):
         return JobAccess(job=job, assignment=None, permissions=dict(MANAGER_PERMISSIONS),
                          scope="manager", org_id=org_id)
@@ -153,6 +161,26 @@ async def accessible_job_ids(user: dict):
         {"_id": 0, "job_id": 1},
     ).to_list(100000)
     return [r["job_id"] for r in rows]
+
+
+async def visible_jobs_query(user: dict) -> dict:
+    """A Mongo filter for the jobs this user may list or aggregate over:
+    - a **manager** sees every org (non-personal) job, plus their own personal jobs;
+    - a **recruiter** sees the org jobs they're actively assigned to, plus their
+      own personal jobs.
+    Personal jobs are visible only to whoever created them. Used everywhere jobs
+    are listed in bulk (jobs list, dashboard, reports) so personal jobs never leak.
+    """
+    org_id = user.get("org_id")
+    own_personal = {"origin": "personal", "created_by": user["id"]}
+    if is_manager(user):
+        return {"org_id": org_id, "$or": [{"origin": {"$ne": "personal"}}, own_personal]}
+    rows = await job_assignments.find(
+        {"org_id": org_id, "user_id": user["id"], "status": "active"},
+        {"_id": 0, "job_id": 1},
+    ).to_list(100000)
+    assigned = [r["job_id"] for r in rows]
+    return {"org_id": org_id, "$or": [{"id": {"$in": assigned}}, own_personal]}
 
 
 def candidate_scope_filter(access: JobAccess, user: dict) -> dict:

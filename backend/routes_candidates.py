@@ -141,7 +141,10 @@ async def get_candidate(candidate_id: str, user: dict = Depends(get_current_user
     transitions = await stage_transitions.find(
         {"candidate_id": candidate_id}, {"_id": 0}
     ).sort("moved_at", -1).to_list(500)
-    cand["job"] = {"id": job["id"], "title": job["title"], "department": job.get("department")}
+    cand["job"] = {
+        "id": job["id"], "title": job["title"], "department": job.get("department"),
+        "custom_stages": job.get("custom_stages") or [],
+    }
     cand["transitions"] = transitions
     # The caller's effective permissions on this candidate's job, so the UI can
     # disable controls the recruiter isn't allowed to use (managers get all true).

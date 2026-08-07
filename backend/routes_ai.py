@@ -271,19 +271,13 @@ async def compare_candidates(body: CompareRequest, user: dict = Depends(get_curr
 
 @router.post("/pipeline-health")
 async def pipeline_health(user: dict = Depends(permissions.require_org_member)):
-    # Org-scoped: manager sees the whole org's pipeline; recruiter sees their
-    # assigned jobs' pipeline.
-    accessible = await permissions.accessible_job_ids(user)
-    job_query = {"org_id": user["org_id"]}
-    if accessible is not None:
-        if not accessible:
-            user_jobs = []
-        job_query["id"] = {"$in": accessible}
+    # Manager → whole org (+ own personal jobs); recruiter → assigned + own
+    # personal jobs, and only their sourced candidates.
+    job_query = await permissions.visible_jobs_query(user)
     user_jobs = await jobs.find(job_query, {"_id": 0}).to_list(1000)
     job_ids = [j["id"] for j in user_jobs]
     cand_query = {"job_id": {"$in": job_ids}}
-    if accessible is not None:
-        # Recruiter without team visibility sees only their sourced candidates.
+    if not permissions.is_manager(user):
         cand_query["sourced_by"] = user["id"]
     all_cands = await candidates.find(cand_query, {"_id": 0}).to_list(10000)
 

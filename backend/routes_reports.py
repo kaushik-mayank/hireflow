@@ -401,18 +401,15 @@ async def _empty_report() -> dict:
 
 @router.get("")
 async def reports(user: dict = Depends(permissions.require_org_member)) -> dict:
-    # Manager → whole org. Recruiter → assigned jobs and their sourced candidates.
-    accessible = await permissions.accessible_job_ids(user)  # None = manager (all)
-    if accessible == []:
-        return await _empty_report()
-
-    job_query = {"org_id": user["org_id"]}
-    if accessible is not None:
-        job_query["id"] = {"$in": accessible}
+    # Manager → whole org (+ own personal jobs). Recruiter → assigned jobs + their
+    # own personal jobs, and only the candidates they sourced.
+    job_query = await permissions.visible_jobs_query(user)
     user_jobs = await jobs.find(job_query, {"_id": 0}).to_list(1000)
+    if not user_jobs:
+        return await _empty_report()
     job_ids = [j["id"] for j in user_jobs]
     cand_query = {"job_id": {"$in": job_ids}}
-    if accessible is not None:
+    if not permissions.is_manager(user):
         # Recruiter's personal report: only the candidates they sourced (§7).
         cand_query["sourced_by"] = user["id"]
     all_cands = await candidates.find(

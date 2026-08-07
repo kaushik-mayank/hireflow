@@ -53,8 +53,8 @@ export default function Jobs() {
     <Layout>
       <Topbar
         title="Jobs"
-        subtitle={isManager ? "Manage your open roles and hiring quotas" : "Roles assigned to you"}
-        actions={isManager ? <Button onClick={() => navigate("/jobs/create")} data-testid="jobs-create-btn"><Plus size={16} /> Create New Job</Button> : null}
+        subtitle={isManager ? "Manage your open roles and hiring quotas" : "Roles assigned to you, plus your own"}
+        actions={<Button onClick={() => navigate("/jobs/create")} data-testid="jobs-create-btn"><Plus size={16} /> {isManager ? "Create New Job" : "Create My Job"}</Button>}
       />
       <PageBody>
         <div className="flex items-center gap-3 mb-5">
@@ -98,7 +98,10 @@ export default function Jobs() {
                     <p className="text-sm text-gray-600 mt-0.5">{j.department || "No department"}</p>
                     {j.hiring_for && <p className="text-xs text-indigo mt-0.5">Hiring for {j.hiring_for}</p>}
                   </div>
-                  <span className={`text-xs font-medium rounded-full px-2.5 py-1 capitalize ${statusColor(j.status)}`}>{j.status}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {j.origin === "personal" && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-indigo-light text-indigo" title="Only you can see this job">Personal</span>}
+                    <span className={`text-xs font-medium rounded-full px-2.5 py-1 capitalize ${statusColor(j.status)}`}>{j.status}</span>
+                  </div>
                 </div>
 
                 <div className="mt-4">
@@ -112,8 +115,8 @@ export default function Jobs() {
                 {(j.my_deadline || j.my_targets?.shortlist_target != null || j.my_targets?.sourced_target != null) && (
                   <div className="flex flex-wrap items-center gap-3 mt-3 text-xs">
                     {j.my_deadline && <span className="inline-flex items-center gap-1 text-[#92400e]"><CalendarClock size={13} /> Due {fmtDate(j.my_deadline)}</span>}
-                    {j.my_targets?.sourced_target != null && <span className="inline-flex items-center gap-1 text-gray-600"><Target size={13} /> Sourced {j.my_targets.sourced_target}</span>}
-                    {j.my_targets?.shortlist_target != null && <span className="inline-flex items-center gap-1 text-gray-600"><Target size={13} /> Shortlist {j.my_targets.shortlist_target}</span>}
+                    {j.my_targets?.sourced_target != null && <span className="inline-flex items-center gap-1 text-gray-600"><Target size={13} /> Sourcing target: {j.my_targets.sourced_target}</span>}
+                    {j.my_targets?.shortlist_target != null && <span className="inline-flex items-center gap-1 text-gray-600"><Target size={13} /> Shortlisting target: {j.my_targets.shortlist_target}</span>}
                   </div>
                 )}
 
@@ -124,7 +127,7 @@ export default function Jobs() {
 
                 <div className="flex gap-2 mt-4">
                   <Button variant="secondary" className="flex-1" onClick={(e) => { e.stopPropagation(); navigate(`/jobs/${j.id}`); }} data-testid={`job-view-${j.id}`}><Eye size={14} /> View</Button>
-                  {isManager && (
+                  {(isManager || j.origin === "personal") && (
                     <Button variant="ghost" onClick={(e) => toggleStatus(e, j)} data-testid={`job-toggle-${j.id}`}>
                       {j.status === "active" ? <Pause size={14} /> : <Play size={14} />}
                     </Button>
@@ -140,7 +143,7 @@ export default function Jobs() {
             ) : isManager ? (
               <EmptyState icon={Briefcase} title="No jobs yet" subtitle="Create your first job to start hiring." action={<Button onClick={() => navigate("/jobs/create")}><Plus size={16} /> Create Job</Button>} />
             ) : (
-              <EmptyState icon={Briefcase} title="No roles assigned yet" subtitle="Your admin will assign roles to you. They'll appear here with your targets and deadline." />
+              <EmptyState icon={Briefcase} title="No jobs yet" subtitle="Roles your admin assigns you appear here — or create your own job, visible only to you." action={<Button onClick={() => navigate("/jobs/create")}><Plus size={16} /> Create My Job</Button>} />
             )}
           </Card>
         )}

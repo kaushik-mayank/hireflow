@@ -4,8 +4,33 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — feature-complete + Session 31 enhancement pack (custom stages, "hiring for", filters, recruiter first-login rework). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🔵 **Cycle 2 — Session 32 fixes (personal jobs for recruiters, target-label wording, candidate-page custom stages, get_candidate commit). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-08
+
+---
+
+## Session 32 — 2026-08-08 — Fixes from owner testing (4 items) + personal jobs
+
+Backend offline-tested (**313 pass forwards AND reverse**); frontend written, not built here.
+
+1. **Target-label wording (recruiter job cards).** "Sourced N / Shortlist N" (read like already-achieved) → **"Sourcing target: N" / "Shortlisting target: N"**; due date unchanged.
+2 & 3. **Recruiters can create their own jobs (personal jobs).** This was the "only an admin can do this" error. Now:
+   - **`create_job`** is `require_org_member` (not manager): a manager creates an **org** job (`origin="org"`, visible to the org + assigned recruiters); a recruiter creates a **personal** job (`origin="personal"`, visible only to them).
+   - **`permissions.resolve_job_access`** — a personal job resolves only for its creator (`scope="owner"`, full perms); everyone else, **including the org's manager, gets 404**.
+   - **`permissions.visible_jobs_query`** (NEW) — the single visibility filter used by **list_jobs, dashboard, reports, pipeline-health**: manager → all org jobs + own personal; recruiter → assigned org jobs + own personal. Personal jobs never leak to anyone else. (Replaces the old `accessible_job_ids`-based logic in those routes.)
+   - **update/delete job** now allow `scope in ("manager","owner")` so a recruiter can manage their own personal job.
+   - Frontend: **Create button shown to recruiters** (labelled "Create My Job"), pause/reactivate available on owned personal cards, a **"Personal" tag** on those cards, recruiter empty state offers create. `JobCreate` already worked once the backend allowed it.
+4. **Custom stages on the candidate page.** Root cause: the `get_candidate` change that returns the job's `custom_stages` was **written but never committed** (so the live candidate API omitted it). Committed now; `CandidateDetail`'s "Move to other stage" dropdown already renders `defaults + cand.job.custom_stages`. (Board + job page already had it.) Custom stages remain **per-job** — each job carries its own list.
+
+### Files
+- Backend: `permissions.py`, `routes_jobs.py`, `routes_dashboard.py`, `routes_reports.py`, `routes_ai.py`, `routes_candidates.py` (get_candidate commit) + tests (`test_org_isolation.py`: personal-job suite; matcher gained `$or`/`$ne`, FakeColl gained delete_many).
+- Frontend: `pages/Jobs.jsx`.
+
+### Note on prior ledger
+The earlier "Assigned/My tabs N/A — personal jobs are Cycle 3" note is now **superseded**: recruiter personal jobs ship in Cycle 2 per this request. Managers still never see them.
+
+### Owner action items (unchanged)
+1. **`CI=true yarn build`** and deploy. 2. Enable Firebase email-link (Runbook §1). 3. Migration dry-run → confirm vs a DB copy.
 
 ---
 

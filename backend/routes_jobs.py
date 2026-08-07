@@ -73,23 +73,19 @@ async def _job_stats(job: dict) -> dict:
 async def list_jobs(user: dict = Depends(permissions.require_org_member)):
     """List postings with candidate counts, scoped to the caller.
 
-    Manager → every job in the org. Recruiter → only jobs they have an active
-    assignment on (Cycle 2 is assignment-only; personal jobs are Cycle 3).
+    Manager → every org job + their own personal jobs. Recruiter → jobs they have
+    an active assignment on + their own personal jobs. Personal jobs never leak.
     """
     org_id = user["org_id"]
-    accessible = await permissions.accessible_job_ids(user)  # None = manager (all)
-    query = {"org_id": org_id}
-    if accessible is not None:
-        if not accessible:
-            return []
-        query["id"] = {"$in": accessible}
+    is_mgr = permissions.is_manager(user)
+    query = await permissions.visible_jobs_query(user)
     docs = await jobs.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     counts = await _counts_for_jobs([d["id"] for d in docs])
     result = [_apply_counts(d, counts) for d in docs]
 
     # For a recruiter, attach their own assignment's deadline/targets so the job
     # card can show them (managers see all org jobs and have no assignment).
-    if accessible is not None and result:
+    if not is_mgr and result:
         rows = await job_assignments.find(
             {"org_id": org_id, "user_id": user["id"], "status": "active",
              "job_id": {"$in": [d["id"] for d in result]}},
@@ -105,19 +101,22 @@ async def list_jobs(user: dict = Depends(permissions.require_org_member)):
 
 
 @router.post("")
-async def create_job(body: JobCreate, user: dict = Depends(permissions.require_manager)):
-    """Only a manager ("Admin") creates jobs in Cycle 2."""
+async def create_job(body: JobCreate, user: dict = Depends(permissions.require_org_member)):
+    """A manager ("Admin") creates an **org** job (visible to the org + assigned
+    recruiters). A recruiter ("User") creates a **personal** job, visible only to
+    them."""
     if not body.title or not body.title.strip():
         raise HTTPException(status_code=400, detail="Job title is required")
     if body.openings_needed < 1:
         raise HTTPException(status_code=400, detail="Openings must be at least 1")
 
     now = datetime.now(timezone.utc).isoformat()
+    origin = "org" if permissions.is_manager(user) else "personal"
     job = {
         "id": str(uuid.uuid4()),
         "org_id": user["org_id"],
         "created_by": user["id"],
-        "origin": "org",
+        "origin": origin,
         "user_id": user["id"],  # retained for backward compatibility with old reads
         "title": body.title.strip(),
         "department": body.department,
@@ -171,9 +170,8 @@ VALID_STATUSES = ("active", "paused", "closed")
 @router.put("/{job_id}")
 async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_current_user)):
     access = await permissions.resolve_job_access(user, job_id)
-    # Recruiter editing (meta + personal JD override) lands in Phase 12; for now
-    # only the manager edits the org job.
-    if access.scope != "manager":
+    # A manager edits org jobs; a recruiter edits only their own personal job.
+    if access.scope not in ("manager", "owner"):
         raise HTTPException(status_code=403, detail="Only an admin can edit this job.")
     job = access.job
 
@@ -212,7 +210,7 @@ async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_curr
 @router.delete("/{job_id}")
 async def delete_job(job_id: str, user: dict = Depends(get_current_user)):
     access = await permissions.resolve_job_access(user, job_id)
-    if access.scope != "manager":
+    if access.scope not in ("manager", "owner"):
         raise HTTPException(status_code=403, detail="Only an admin can delete this job.")
     cand_ids = [c["id"] async for c in candidates.find({"job_id": job_id}, {"id": 1})]
     if cand_ids:

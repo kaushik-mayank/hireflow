@@ -68,18 +68,12 @@ async def dashboard(user: dict = Depends(permissions.require_org_member)):
     # Manager → the whole org's jobs and candidates. Recruiter → only their
     # assigned jobs, and (without can_view_team_candidates) only candidates they
     # sourced. Same org+assignment spine as every other list route.
-    accessible = await permissions.accessible_job_ids(user)  # None = manager (all)
-    if accessible == []:
-        # Recruiter with no active assignments — nothing to show.
-        return {"stats": _compute_stats([], []), "jobs_summary": [], "action_items": [], "upcoming_interviews": []}
-
-    job_query = {"org_id": user["org_id"]}
-    if accessible is not None:
-        job_query["id"] = {"$in": accessible}
+    # Jobs the caller may see (org jobs per role + their own personal jobs).
+    job_query = await permissions.visible_jobs_query(user)
     user_jobs = await jobs.find(job_query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     job_ids = [j["id"] for j in user_jobs]
     cand_query = {"job_id": {"$in": job_ids}}
-    if accessible is not None:
+    if not permissions.is_manager(user):
         # A recruiter's dashboard counts only the candidates they sourced — the
         # conservative choice, matching the "personal reports" rule (§7).
         cand_query["sourced_by"] = user["id"]
