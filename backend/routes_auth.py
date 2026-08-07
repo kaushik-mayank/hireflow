@@ -236,10 +236,14 @@ async def firebase_exchange(body: FirebaseAuthRequest, request: Request):
             raise HTTPException(status_code=500, detail=ORG_SETUP_FAILED) from exc
         user.pop("_id", None)
 
-    # Gate the session on a verified email. The record above is already saved.
-    # Approved recruiters skip this: their admin already vouched for the address,
-    # and there is no separate confirmation step for them in this release.
-    if REQUIRE_EMAIL_VERIFICATION and not claims["email_verified"] and not approved_recruiter:
+    # Gate the session on a verified email — but ONLY for public manager
+    # sign-ups. A recruiter (whether being activated now or signing in later)
+    # never hits this: their admin vouched for the address and they verify it as
+    # part of first-time setup, so their later password logins must not be
+    # bounced back to a "verify your email" screen.
+    is_recruiter = bool(user) and user.get("org_role") == "recruiter"
+    if (REQUIRE_EMAIL_VERIFICATION and not claims["email_verified"]
+            and not approved_recruiter and not is_recruiter):
         return {"verified": False}
 
     await _record_login(user, request)

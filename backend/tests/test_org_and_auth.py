@@ -423,6 +423,20 @@ def test_new_manager_unverified_email_gets_no_session(world):
     assert out == {"verified": False}
 
 
+def test_activated_recruiter_unverified_still_gets_session(world):
+    # The reported bug: an already-activated recruiter (status active, recruiter
+    # role) with an unverified Firebase email must NOT be bounced to "verify your
+    # email" on later logins.
+    _FB["configured"] = True
+    _seed(world, users=[MANAGER, {**_approved(), "status": "active", "firebase_uid": "fb-rue@alpha.com"}])
+    out = run(world.auth_routes.firebase_exchange(
+        _ns(id_token="ok:rue@alpha.com:0", name=None, company=None),  # :0 = unverified
+        _ns(client=None, headers={}),
+    ))
+    assert out["verified"] is True
+    assert out["user"]["org_role"] == "recruiter"
+
+
 def test_suspended_user_cannot_exchange(world):
     _FB["configured"] = True
     _seed(world, users=[MANAGER, {**_approved(), "status": "disabled"}])

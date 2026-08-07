@@ -11,6 +11,32 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 HIRED_STAGE = "Selected"
 
+# Lower-cased default pipeline names, used only to keep custom stages from
+# duplicating a built-in one (the canonical list lives in routes_candidates).
+_DEFAULT_STAGE_KEYS = {
+    "applied", "ai ranked", "shortlisted", "contact pending", "contacted",
+    "interview scheduled", "interview done", "selected", "rejected", "on hold",
+}
+MAX_CUSTOM_STAGES = 12
+
+
+def _clean_stages(raw) -> list:
+    """Sanitise manager-supplied extra stages: trim, cap length/count, drop
+    blanks, de-duplicate, and drop anything that collides with a default stage."""
+    if not isinstance(raw, list):
+        return []
+    seen, out = set(), []
+    for item in raw:
+        name = str(item or "").strip()[:40]
+        key = name.lower()
+        if not name or key in seen or key in _DEFAULT_STAGE_KEYS:
+            continue
+        seen.add(key)
+        out.append(name)
+        if len(out) >= MAX_CUSTOM_STAGES:
+            break
+    return out
+
 
 def _apply_counts(job: dict, counts: dict) -> dict:
     stats = counts.get(job["id"], {})
@@ -100,6 +126,8 @@ async def create_job(body: JobCreate, user: dict = Depends(permissions.require_m
         "jd_enhanced": body.jd_enhanced,
         "status": body.status or "active",
         "deadline": body.deadline,
+        "hiring_for": (body.hiring_for or "").strip() or None,
+        "custom_stages": _clean_stages(body.custom_stages),
         "created_at": now,
         "updated_at": now,
     }
@@ -160,6 +188,10 @@ async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_curr
         )
     if "openings_needed" in updates and updates["openings_needed"] is not None and updates["openings_needed"] < 1:
         raise HTTPException(status_code=400, detail="Openings must be at least 1")
+    if "custom_stages" in updates:
+        updates["custom_stages"] = _clean_stages(updates["custom_stages"])
+    if "hiring_for" in updates:
+        updates["hiring_for"] = (updates["hiring_for"] or "").strip() or None
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     # Track JD edits separately so a recruiter's stale personal override can be
     # detected without any non-JD edit tripping the "admin updated the JD" notice.

@@ -173,11 +173,16 @@ async def _move_stage(cand: dict, to_stage: str, note: str, user: dict):
     })
 
 
+def _allowed_stages(job: dict) -> list:
+    """Default pipeline plus any custom stages this job's admin added."""
+    return STAGES + list(job.get("custom_stages") or [])
+
+
 @router.put("/{candidate_id}/stage")
 async def update_stage(candidate_id: str, body: StageUpdate, user: dict = Depends(get_current_user)):
-    if body.stage not in STAGES:
-        raise HTTPException(status_code=400, detail="Invalid stage")
     cand, access = await permissions.resolve_candidate_access(user, candidate_id)
+    if body.stage not in _allowed_stages(access.job):
+        raise HTTPException(status_code=400, detail="Invalid stage")
     # Rejecting is a separate, more sensitive permission from an ordinary move.
     permissions.require_permission(
         access, "can_reject_candidates" if body.stage == "Rejected" else "can_move_stage"
@@ -200,7 +205,9 @@ async def bulk_update_stage(body: BulkStageUpdate, user: dict = Depends(get_curr
     update plus one transition insert each — moving 50 candidates cost over 200
     round-trips. Now a fixed number of queries plus two bulk writes.
     """
-    if body.stage not in STAGES:
+    # A custom stage is valid only for the jobs that define it, so per-candidate
+    # validity is checked in the loop below; here we only reject an empty value.
+    if not body.stage or not body.stage.strip():
         raise HTTPException(status_code=400, detail="Invalid stage")
     if not body.candidate_ids:
         return {"success": True, "updated": 0}
@@ -229,6 +236,10 @@ async def bulk_update_stage(body: BulkStageUpdate, user: dict = Depends(get_curr
         if (access.scope == "assigned"
                 and not access.can("can_view_team_candidates")
                 and c.get("sourced_by") != user["id"]):
+            continue
+        # The target stage must be valid for THIS candidate's job (defaults +
+        # that job's custom stages).
+        if body.stage not in _allowed_stages(access.job):
             continue
         # Same permission gate as a single move: skip (don't fail the batch)
         # candidates on jobs where the caller can't make this move.

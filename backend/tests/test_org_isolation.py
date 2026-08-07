@@ -380,6 +380,29 @@ def test_move_stage_allowed_with_permission(world):
     assert out["success"] is True
 
 
+def test_move_stage_accepts_a_jobs_custom_stage(world):
+    _reset(world, jobs=[{**JOB_A, "custom_stages": ["L1", "L2"]}], candidates=[CAND_A], assignments=[_assign({})])
+    out = run(world.cand_r.update_stage("cand-A", _ns(stage="L1", note=None), RECRUITER_A))
+    assert out["success"] is True and out["stage"] == "L1"
+
+
+def test_move_stage_rejects_unknown_stage(world):
+    _reset(world, jobs=[JOB_A], candidates=[CAND_A], assignments=[_assign({})])
+    with pytest.raises(world.exc) as e:
+        run(world.cand_r.update_stage("cand-A", _ns(stage="Nonsense", note=None), RECRUITER_A))
+    assert e.value.status_code == 400
+
+
+def test_create_job_stores_hiring_for_and_clean_custom_stages(world):
+    _reset(world, jobs=[])
+    body = _ns(title="Nurse", department=None, openings_needed=1, jd_text=None, jd_enhanced=None,
+               deadline=None, status="active", hiring_for="  Acme Health ",
+               custom_stages=["L1", "L2", "L1", "Applied", "  "])
+    out = run(world.jobs_r.create_job(body, MANAGER_A))
+    assert out["hiring_for"] == "Acme Health"
+    assert out["custom_stages"] == ["L1", "L2"]  # deduped; "Applied" (default) + blank dropped
+
+
 # ===========================================================================
 # AI
 # ===========================================================================

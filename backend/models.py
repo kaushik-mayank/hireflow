@@ -112,6 +112,12 @@ class JobCreate(BaseModel):
     jd_enhanced: Optional[str] = None
     deadline: Optional[str] = None
     status: str = "active"
+    # Which company/client this role is being hired for — lets an agency working
+    # for several clients tell their jobs apart. Visible to everyone on the job.
+    hiring_for: Optional[str] = None
+    # Extra pipeline stages this job adds on top of the defaults (e.g. L1/L2/L3
+    # interview rounds). Candidates can be moved into these as well as the defaults.
+    custom_stages: Optional[List[str]] = None
 
 
 class JobUpdate(BaseModel):
@@ -122,6 +128,8 @@ class JobUpdate(BaseModel):
     jd_enhanced: Optional[str] = None
     deadline: Optional[str] = None
     status: Optional[str] = None
+    hiring_for: Optional[str] = None
+    custom_stages: Optional[List[str]] = None
 
 
 # ---------- Candidates ----------
