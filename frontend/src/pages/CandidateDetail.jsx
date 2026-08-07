@@ -129,6 +129,7 @@ export default function CandidateDetail() {
   const canReject = can("can_reject_candidates");
   const canUseAI = can("can_use_ai");
   const NO_PERM = "Your admin hasn't given you this permission on this job.";
+  const stages = [...STAGES, ...(cand.job?.custom_stages || [])];
 
   return (
     <Layout>
@@ -241,7 +242,7 @@ export default function CandidateDetail() {
               </div>
               <select onChange={(e) => e.target.value && moveStage(e.target.value)} value="" disabled={!canMove} title={canMove ? undefined : NO_PERM} className="w-full mt-2 rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white disabled:opacity-50 disabled:cursor-not-allowed" data-testid="stage-select">
                 <option value="" disabled>{canMove ? "Move to other stage..." : "Moving not enabled"}</option>
-                {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                {stages.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
               {!canMove && <p className="text-xs text-gray-400 mt-2">Moving candidates isn't enabled for you on this job.</p>}
             </Card>

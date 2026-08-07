@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Hexagon, Mail, Lock, ArrowRight, ChevronLeft } from "lucide-react";
+import { Hexagon, Mail, Lock, ArrowRight, ChevronLeft, MailCheck } from "lucide-react";
 import { authApi, apiErr } from "@/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Spinner } from "@/components/ui";
@@ -8,11 +8,13 @@ import { pendingCompanyKey } from "@/constants";
 import {
   isFirebaseConfigured, firebaseSignInRaw, firebaseCreateAccount,
   firebaseResendAndSignOut, firebaseErrorMessage, shouldTryLegacyLogin,
+  firebaseSendSetupLink, firebaseIsSetupLink, firebaseStoredSetupEmail,
+  firebaseCompleteSetupLink, firebaseSetPasswordForCurrentUser,
 } from "@/lib/firebase";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NOT_APPROVED_MSG =
-  "We couldn't find an account for this email. If an admin added you to a team, double-check it's spelled the same way — otherwise ask them to add you. Starting your own organisation? Use Sign up.";
+  "You don't have an approved account yet. Contact your company's manager to be added — or, if you're starting your own organisation, use Sign up.";
 const SERVER_MSG =
   "We're having trouble reaching the server right now. Please try again in a moment.";
 
@@ -26,24 +28,54 @@ function strength(pw) {
 }
 
 export default function Login() {
-  // Email-first flow: enter the email, then either set a first-time password
-  // (admin-approved teammate), sign in normally, or see a clear message.
-  const [step, setStep] = useState("email"); // "email" | "password" | "create"
+  // email → (onboarding-status) → verify_sent (email-link) → create (set password)
+  //                              → password (existing account)
+  const [step, setStep] = useState("email");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [status, setStatus] = useState(null); // onboarding status hint
+  const [status, setStatus] = useState(null);
+  const [setupMode, setSetupMode] = useState("link"); // "link" (verify first) | "password" (fallback)
+  const [linkPending, setLinkPending] = useState(false); // returned from a setup link, need the email
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  // If the page was opened from a setup email link, complete the verified sign-in
+  // and move straight to choosing a password.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!isFirebaseConfigured || !(await firebaseIsSetupLink())) return;
+        const stored = firebaseStoredSetupEmail();
+        if (!stored) {
+          // Opened on a different device/browser — ask for the email to confirm.
+          if (!cancelled) { setLinkPending(true); setInfo("Confirm your email to finish setting up your account."); }
+          return;
+        }
+        setChecking(true);
+        await firebaseCompleteSetupLink(stored); // now signed in with a verified email
+        if (cancelled) return;
+        setEmail(stored);
+        setSetupMode("link");
+        setStep("create");
+      } catch {
+        if (!cancelled) setError("That sign-in link is invalid or has expired. Please start again.");
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const backToEmail = () => {
-    setStep("email"); setError(""); setPassword(""); setConfirm("");
+    setStep("email"); setError(""); setInfo(""); setPassword(""); setConfirm(""); setLinkPending(false);
   };
 
-  /** Password sign-in against the pre-Firebase user store (demo/legacy accounts). */
   const legacyLogin = async () => {
     const res = await authApi.login({ email, password });
     login(res.data.token, res.data.user);
@@ -56,7 +88,6 @@ export default function Login() {
     try { pendingCompany = localStorage.getItem(companyKey) || undefined; } catch { /* ignore */ }
     const res = await authApi.firebase({ id_token: idToken, company: pendingCompany });
     if (!res.data.verified || !res.data.token) {
-      // A public manager sign-up whose email isn't verified yet.
       await firebaseResendAndSignOut();
       setError("Please verify your email to continue. We've sent a new verification link to your inbox — open it, then sign in.");
       return;
@@ -67,16 +98,38 @@ export default function Login() {
   };
 
   const checkEmail = async () => {
-    setError("");
+    setError(""); setInfo("");
     if (!EMAIL_RE.test(email)) { setError("Enter a valid email address."); return; }
     setChecking(true);
     try {
+      // Returning from a setup link opened elsewhere: complete it with this email.
+      if (linkPending) {
+        await firebaseCompleteSetupLink(email); // now signed in with a verified email
+        setSetupMode("link");
+        setLinkPending(false);
+        setStep("create");
+        return;
+      }
       if (!isFirebaseConfigured) { setStatus("registered"); setStep("password"); return; }
+
       const { data } = await authApi.onboardingStatus(email);
       setStatus(data.status);
-      setStep(data.status === "needs_setup" ? "create" : "password");
+      if (data.status === "not_approved") { setError(NOT_APPROVED_MSG); return; }
+      if (data.status === "registered") { setStep("password"); return; }
+
+      // needs_setup → verify the email first via a secure link.
+      try {
+        await firebaseSendSetupLink(email);
+        setSetupMode("link");
+        setStep("verify_sent");
+      } catch (linkErr) {
+        // Email-link sign-in may not be enabled on the Firebase project. Fall
+        // back to letting them set a password directly so they're never stuck.
+        setSetupMode("password");
+        setStep("create");
+        setInfo("Choose a password to finish setting up your account.");
+      }
     } catch {
-      // If the check itself fails, don't trap the user — let them try to sign in.
       setStatus("registered");
       setStep("password");
     } finally {
@@ -95,7 +148,6 @@ export default function Login() {
         if (shouldTryLegacyLogin(fbErr)) {
           try { await legacyLogin(); return; }
           catch {
-            // No Firebase account and no legacy account for this email.
             setError(status === "not_approved" ? NOT_APPROVED_MSG : "That email or password isn't correct.");
             return;
           }
@@ -118,22 +170,28 @@ export default function Login() {
     if (password !== confirm) { setError("Those passwords don't match."); return; }
     setLoading(true);
     try {
-      const { idToken } = await firebaseCreateAccount(email, password);
+      let idToken;
+      if (setupMode === "link") {
+        // Email already verified via the link; just set the password.
+        ({ idToken } = await firebaseSetPasswordForCurrentUser(password));
+      } else {
+        // Fallback: create the account with this password.
+        try {
+          ({ idToken } = await firebaseCreateAccount(email, password));
+        } catch (createErr) {
+          if (createErr?.code === "auth/email-already-in-use") {
+            const r = await firebaseSignInRaw(email, password);
+            idToken = r.idToken;
+          } else {
+            setError(firebaseErrorMessage(createErr, "We couldn't set up your account. Please try again."));
+            return;
+          }
+        }
+      }
       try { await exchangeAndFinish(idToken); }
       catch (exErr) { setError(exErr?.response?.data?.detail || SERVER_MSG); }
-    } catch (createErr) {
-      // They already have a Firebase account (e.g. they used Sign up first). Try
-      // signing them in with the same password rather than dead-ending.
-      if (createErr?.code === "auth/email-already-in-use") {
-        try {
-          const result = await firebaseSignInRaw(email, password);
-          await exchangeAndFinish(result.idToken);
-        } catch {
-          setError("An account already exists for this email. Try that password, or reset it from Forgot password.");
-        }
-      } else {
-        setError(firebaseErrorMessage(createErr, "We couldn't set up your account. Please try again."));
-      }
+    } catch (err) {
+      setError(firebaseErrorMessage(err, "We couldn't finish setting up your account. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -143,6 +201,7 @@ export default function Login() {
     e.preventDefault();
     if (step === "email") return checkEmail();
     if (step === "create") return doCreate();
+    if (step === "verify_sent") return undefined;
     return doSignIn();
   };
 
@@ -153,134 +212,108 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex">
-      {/* Left brand panel */}
       <div className="hidden lg:flex w-[45%] bg-navy relative overflow-hidden flex-col justify-between p-12">
         <Link to="/" className="flex items-center gap-2 text-white">
           <Hexagon size={24} className="text-indigo" fill="#4f6ef7" />
           <span className="text-xl font-semibold">HireFlow</span>
         </Link>
         <div className="relative z-10">
-          <h2 className="text-white text-4xl font-semibold leading-tight">
-            From zero to hired,<br />
-            <span className="text-indigo">powered by AI.</span>
-          </h2>
+          <h2 className="text-white text-4xl font-semibold leading-tight">From zero to hired,<br /><span className="text-indigo">powered by AI.</span></h2>
           <p className="text-white/55 mt-5 text-[15px] max-w-md leading-relaxed">
             Post a role, rank every applicant, run a visual hiring pipeline, and let AI handle the busywork — whether you're hiring nurses, warehouse staff or engineers.
           </p>
-          <div className="flex gap-6 mt-10">
-            {[["7", "AI touchpoints"], ["1", "Unified pipeline"], ["Any", "Industry"]].map(([n, l]) => (
-              <div key={l}>
-                <div className="text-indigo text-3xl font-bold">{n}</div>
-                <div className="text-white/45 text-xs mt-1">{l}</div>
-              </div>
-            ))}
-          </div>
         </div>
         <div className="text-white/30 text-xs">© {new Date().getFullYear()} HireFlow</div>
         <div className="absolute -right-24 -bottom-24 w-80 h-80 rounded-full bg-indigo/20 blur-3xl" />
         <div className="absolute right-20 top-20 w-40 h-40 rounded-full bg-purple/20 blur-3xl" />
       </div>
 
-      {/* Right form */}
       <div className="flex-1 flex items-center justify-center bg-gray-50 p-6">
         <div className="w-full max-w-sm animate-fade-in">
-          {step === "create" ? (
-            <>
-              <h1 className="text-2xl font-semibold text-gray-800">Set your password</h1>
-              <p className="text-gray-600 text-sm mt-1">Welcome! Choose a password to finish setting up your account for <span className="font-medium text-gray-800">{email}</span>.</p>
-            </>
+          {step === "verify_sent" ? (
+            <div className="py-4" data-testid="login-verify-sent">
+              <div className="w-14 h-14 rounded-2xl bg-green-light flex items-center justify-center"><MailCheck size={26} className="text-green" /></div>
+              <h1 className="mt-5 text-2xl font-semibold text-gray-800">Verify your email</h1>
+              <p className="text-gray-600 text-sm mt-2 leading-relaxed">
+                We've sent a secure link to <span className="font-medium text-gray-800">{email}</span>. Open it on this
+                device to confirm your email — then you'll choose a password.
+              </p>
+              <button type="button" onClick={backToEmail} className="mt-6 flex items-center gap-1.5 text-sm text-indigo hover:underline"><ChevronLeft size={15} /> Use a different email</button>
+            </div>
           ) : (
             <>
-              <h1 className="text-2xl font-semibold text-gray-800">Welcome back</h1>
-              <p className="text-gray-600 text-sm mt-1">Sign in to your hiring dashboard</p>
+              {step === "create" ? (
+                <>
+                  <h1 className="text-2xl font-semibold text-gray-800">Set your password</h1>
+                  <p className="text-gray-600 text-sm mt-1">Your email is verified — choose a password to finish setting up <span className="font-medium text-gray-800">{email}</span>.</p>
+                </>
+              ) : (
+                <>
+                  <h1 className="text-2xl font-semibold text-gray-800">Welcome back</h1>
+                  <p className="text-gray-600 text-sm mt-1">Sign in to your hiring dashboard</p>
+                </>
+              )}
+
+              {error && <div className="mt-5 bg-coral-light text-coral text-sm rounded-lg px-4 py-2.5 leading-relaxed" data-testid="login-error">{error}</div>}
+              {info && !error && <div className="mt-5 bg-indigo-light text-indigo text-sm rounded-lg px-4 py-2.5 leading-relaxed">{info}</div>}
+
+              <form onSubmit={onSubmit} className="mt-6 space-y-4">
+                {step === "email" ? (
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Email</label>
+                    <div className="relative mt-1.5">
+                      <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input type="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="you@work-email.com" data-testid="login-email" />
+                    </div>
+                  </div>
+                ) : (
+                  <button type="button" onClick={backToEmail} className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-indigo" data-testid="login-change-email">
+                    <ChevronLeft size={15} /> <span className="truncate">{email}</span>
+                  </button>
+                )}
+
+                {step === "password" && (
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-gray-700">Password</label>
+                      <Link to="/forgot-password" className="text-xs text-indigo font-medium hover:underline" data-testid="goto-forgot">Forgot password?</Link>
+                    </div>
+                    <div className="relative mt-1.5">
+                      <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input type="password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} placeholder="••••••••" data-testid="login-password" />
+                    </div>
+                  </div>
+                )}
+
+                {step === "create" && (
+                  <>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">New password</label>
+                      <div className="relative mt-1.5">
+                        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input type="password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} placeholder="At least 8 characters" data-testid="login-create-password" />
+                      </div>
+                      {password && <div className="flex gap-1 mt-2">{[1, 2, 3, 4].map((i) => <div key={i} className="h-1 flex-1 rounded-full" style={{ background: i <= st ? stColors[st] : "#e5e7eb" }} />)}</div>}
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Confirm password</label>
+                      <div className="relative mt-1.5">
+                        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputCls} placeholder="••••••••" data-testid="login-confirm" />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <Button type="submit" disabled={loading || checking} className="w-full" data-testid="login-submit">
+                  {loading || checking ? <Spinner size={16} />
+                    : step === "email" ? <>Continue <ArrowRight size={16} /></>
+                    : step === "create" ? <>Create account &amp; sign in <ArrowRight size={16} /></>
+                    : <>Sign in <ArrowRight size={16} /></>}
+                </Button>
+              </form>
             </>
           )}
-
-          {error && (
-            <div className="mt-5 bg-coral-light text-coral text-sm rounded-lg px-4 py-2.5 leading-relaxed" data-testid="login-error">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={onSubmit} className="mt-6 space-y-4">
-            {/* Email — shown as an editable field on step 1, read-only summary after */}
-            {step === "email" ? (
-              <div>
-                <label className="text-sm font-medium text-gray-700">Email</label>
-                <div className="relative mt-1.5">
-                  <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)}
-                    className={inputCls} placeholder="you@work-email.com" data-testid="login-email"
-                  />
-                </div>
-              </div>
-            ) : (
-              <button type="button" onClick={backToEmail} className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-indigo" data-testid="login-change-email">
-                <ChevronLeft size={15} /> <span className="truncate">{email}</span>
-              </button>
-            )}
-
-            {step === "password" && (
-              <div>
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-gray-700">Password</label>
-                  <Link to="/forgot-password" className="text-xs text-indigo font-medium hover:underline" data-testid="goto-forgot">
-                    Forgot password?
-                  </Link>
-                </div>
-                <div className="relative mt-1.5">
-                  <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)}
-                    className={inputCls} placeholder="••••••••" data-testid="login-password"
-                  />
-                </div>
-              </div>
-            )}
-
-            {step === "create" && (
-              <>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">New password</label>
-                  <div className="relative mt-1.5">
-                    <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="password" required autoFocus value={password} onChange={(e) => setPassword(e.target.value)}
-                      className={inputCls} placeholder="At least 8 characters" data-testid="login-create-password"
-                    />
-                  </div>
-                  {password && (
-                    <div className="flex gap-1 mt-2">
-                      {[1, 2, 3, 4].map((i) => (
-                        <div key={i} className="h-1 flex-1 rounded-full" style={{ background: i <= st ? stColors[st] : "#e5e7eb" }} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Confirm password</label>
-                  <div className="relative mt-1.5">
-                    <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)}
-                      className={inputCls} placeholder="••••••••" data-testid="login-confirm"
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-
-            <Button type="submit" disabled={loading || checking} className="w-full" data-testid="login-submit">
-              {loading || checking
-                ? <Spinner size={16} />
-                : step === "email"
-                  ? <>Continue <ArrowRight size={16} /></>
-                  : step === "create"
-                    ? <>Create account &amp; sign in <ArrowRight size={16} /></>
-                    : <>Sign in <ArrowRight size={16} /></>}
-            </Button>
-          </form>
 
           <div className="mt-6 text-sm text-gray-600 text-center">
             Don't have an account?{" "}

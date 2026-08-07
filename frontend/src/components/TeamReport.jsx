@@ -43,6 +43,7 @@ const pct = (v) => (v == null ? "—" : `${v}%`);
 
 export default function TeamReport() {
   const [range, setRange] = useState(30);
+  const [member, setMember] = useState("all"); // filter panels to one teammate
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -108,6 +109,9 @@ export default function TeamReport() {
     activity = [], ai_usage: aiUsage = [], insights = [], totals = {},
   } = data;
   const nameOf = (r) => r.user_name || r.user_email || "—";
+  // Filter the per-recruiter panels to a single teammate when one is selected.
+  const memberOptions = throughput.map((r) => ({ id: r.user_id, name: nameOf(r) }));
+  const fm = (rows) => (member === "all" ? rows : rows.filter((r) => r.user_id === member));
 
   if ((totals.recruiters || 0) === 0) {
     return (
@@ -118,9 +122,15 @@ export default function TeamReport() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-gray-500">{totals.recruiters} recruiters · {totals.candidates} candidates · {totals.hires} hires</p>
-        {rangeToolbar}
+        <div className="flex items-center gap-2">
+          <select value={member} onChange={(e) => setMember(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm bg-white outline-none focus:border-indigo" data-testid="team-member-filter">
+            <option value="all">All members</option>
+            {memberOptions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          {rangeToolbar}
+        </div>
       </div>
 
       {insights.length > 0 && (
@@ -165,7 +175,7 @@ export default function TeamReport() {
               </tr>
             </thead>
             <tbody>
-              {throughput.map((r) => (
+              {fm(throughput).map((r) => (
                 <tr key={r.user_id} className="border-b border-gray-100 last:border-0">
                   <td className="px-3 py-2"><div className="flex items-center gap-2"><Avatar name={nameOf(r)} size={28} /><span className="font-medium text-gray-800">{nameOf(r)}</span></div></td>
                   <td className="px-3 py-2 text-gray-700">{r.sourced}</td>
@@ -190,7 +200,7 @@ export default function TeamReport() {
               </tr>
             </thead>
             <tbody>
-              {quality.map((r) => (
+              {fm(quality).map((r) => (
                 <tr key={r.user_id} className="border-b border-gray-100 last:border-0">
                   <td className="px-3 py-2 font-medium text-gray-800">{nameOf(r)}</td>
                   <td className="px-3 py-2 text-gray-700">{r.sourced}</td>
@@ -206,9 +216,9 @@ export default function TeamReport() {
       </Section>
 
       <Section icon={Target} title="Target attainment" subtitle="Progress against each target set on an assignment. Blank targets are hidden.">
-        {attainment.length ? (
+        {fm(attainment).length ? (
           <div className="space-y-4">
-            {attainment.map((row) =>
+            {fm(attainment).map((row) =>
               row.metrics.map((m) => {
                 const meta = STATUS_META[m.status] || STATUS_META.no_deadline;
                 return (
@@ -228,9 +238,9 @@ export default function TeamReport() {
 
       <div className="grid md:grid-cols-2 gap-6">
         <Section icon={CalendarClock} title="Deadline health" subtitle="Assignments with a deadline, most overdue first." action={csvBtn("deadlines")}>
-          {deadlines.length ? (
+          {fm(deadlines).length ? (
             <ul className="space-y-2">
-              {deadlines.map((d) => (
+              {fm(deadlines).map((d) => (
                 <li key={d.assignment_id} className="flex items-center justify-between text-sm">
                   <span className="text-gray-700"><span className="font-medium">{nameOf(d)}</span> <span className="text-gray-400">· {d.job_title || "Job"}</span></span>
                   <span className="flex items-center gap-2">
@@ -248,7 +258,7 @@ export default function TeamReport() {
             <table className="w-full text-sm">
               <thead><tr className="text-left text-gray-600 text-xs border-b border-gray-200">{["Recruiter", "Open jobs", "Active candidates"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
               <tbody>
-                {workload.map((w) => (
+                {fm(workload).map((w) => (
                   <tr key={w.user_id} className="border-b border-gray-100 last:border-0">
                     <td className="px-3 py-2 font-medium text-gray-800">{nameOf(w)}</td>
                     <td className="px-3 py-2 text-gray-700">{w.open_assignments}</td>
@@ -265,7 +275,7 @@ export default function TeamReport() {
             <table className="w-full text-sm">
               <thead><tr className="text-left text-gray-600 text-xs border-b border-gray-200">{["Recruiter", "Events", "Last active"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
               <tbody>
-                {activity.map((a) => (
+                {fm(activity).map((a) => (
                   <tr key={a.user_id} className="border-b border-gray-100 last:border-0">
                     <td className="px-3 py-2 font-medium text-gray-800">{nameOf(a)}</td>
                     <td className="px-3 py-2 text-gray-700">{a.events}</td>
@@ -282,7 +292,7 @@ export default function TeamReport() {
             <table className="w-full text-sm">
               <thead><tr className="text-left text-gray-600 text-xs border-b border-gray-200">{["Recruiter", "AI calls"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>
               <tbody>
-                {aiUsage.map((u) => (
+                {fm(aiUsage).map((u) => (
                   <tr key={u.user_id} className="border-b border-gray-100 last:border-0">
                     <td className="px-3 py-2 font-medium text-gray-800">{nameOf(u)}</td>
                     <td className="px-3 py-2 text-gray-700">{u.ai_calls}</td>

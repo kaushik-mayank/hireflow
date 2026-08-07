@@ -7,7 +7,7 @@ import { Card, Button, AIButton, Modal, Spinner } from "@/components/ui";
 import { toast } from "sonner";
 
 export default function JobCreate() {
-  const [form, setForm] = useState({ title: "", department: "", openings_needed: 1, deadline: "", jd_text: "", jd_enhanced: "" });
+  const [form, setForm] = useState({ title: "", department: "", hiring_for: "", openings_needed: 1, deadline: "", custom_stages: "", jd_text: "", jd_enhanced: "" });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [enhanceLoading, setEnhanceLoading] = useState(false);
@@ -33,7 +33,8 @@ export default function JobCreate() {
     if (!validate()) return;
     setSaving(true);
     try {
-      const res = await jobsApi.create({ ...form, openings_needed: Number(form.openings_needed), status });
+      const custom_stages = form.custom_stages.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+      const res = await jobsApi.create({ ...form, openings_needed: Number(form.openings_needed), custom_stages, status });
       toast.success(status === "draft" ? "Draft saved" : "Job created");
       navigate(`/jobs/${res.data.id}`);
     } catch (err) {
@@ -98,8 +99,19 @@ export default function JobCreate() {
             </div>
 
             <div>
+              <label className="text-sm font-medium text-gray-700">Hiring for <span className="text-gray-400 font-normal">(company / client)</span></label>
+              <input value={form.hiring_for} onChange={set("hiring_for")} className={`mt-1.5 ${field("hiring_for")}`} placeholder="e.g. Acme Health — visible to everyone on this job" data-testid="job-hiring-for" />
+            </div>
+
+            <div>
               <label className="text-sm font-medium text-gray-700">Application Deadline</label>
               <input type="date" value={form.deadline} onChange={set("deadline")} className={`mt-1.5 ${field("deadline")}`} data-testid="job-deadline" />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700">Extra pipeline stages <span className="text-gray-400 font-normal">(optional)</span></label>
+              <input value={form.custom_stages} onChange={set("custom_stages")} className={`mt-1.5 ${field("custom_stages")}`} placeholder="e.g. L1, L2, L3 — added on top of the default stages" data-testid="job-custom-stages" />
+              <p className="text-xs text-gray-400 mt-1">Separate with commas. These appear as extra columns on the board for this job.</p>
             </div>
 
             <div>

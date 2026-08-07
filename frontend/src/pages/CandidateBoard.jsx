@@ -23,6 +23,8 @@ export default function CandidateBoard() {
   // undefined defaults to allowed so legacy responses never lock anyone out).
   const perms = job?.effective_permissions || {};
   const canMove = perms.can_move_stage !== false;
+  // Default pipeline plus any extra stages this job's admin added.
+  const boardStages = [...STAGES, ...(job?.custom_stages || [])];
 
   const load = useCallback(() => {
     Promise.all([jobsApi.get(id), candidatesApi.listByJob(id)])
@@ -73,9 +75,9 @@ export default function CandidateBoard() {
         )}
         <div className="flex-1 overflow-x-auto kanban-scroll p-5">
           <div className="flex gap-3 h-full min-w-max">
-            {STAGES.map((stage) => {
+            {boardStages.map((stage) => {
               const items = cands.filter((c) => c.stage === stage);
-              const sc = STAGE_COLORS[stage];
+              const sc = STAGE_COLORS[stage] || STAGE_COLORS["On Hold"] || { bg: "#eef2ff", color: "#4f46e5" };
               const isOver = dragOverStage === stage;
               return (
                 <div

@@ -221,6 +221,53 @@ export async function firebaseCreateAccount(email, password) {
   return { idToken };
 }
 
+// ---------------------------------------------------------------------------
+// First-time recruiter setup: verify the email BEFORE setting a password, using
+// Firebase's email-link (passwordless) sign-in. The recruiter clicks the emailed
+// link (which proves + verifies ownership), then chooses a password. Requires
+// "Email link (passwordless sign-in)" enabled in the Firebase console.
+// ---------------------------------------------------------------------------
+const SETUP_EMAIL_KEY = "hireflow_setup_email";
+
+export async function firebaseSendSetupLink(email) {
+  const auth = await getAuthInstance();
+  const { sendSignInLinkToEmail } = await import("firebase/auth");
+  const actionCodeSettings = { url: `${window.location.origin}/login`, handleCodeInApp: true };
+  await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+  try { localStorage.setItem(SETUP_EMAIL_KEY, email); } catch { /* ignore */ }
+}
+
+export async function firebaseIsSetupLink() {
+  const auth = await getAuthInstance();
+  const { isSignInWithEmailLink } = await import("firebase/auth");
+  return isSignInWithEmailLink(auth, window.location.href);
+}
+
+export function firebaseStoredSetupEmail() {
+  try { return localStorage.getItem(SETUP_EMAIL_KEY) || ""; } catch { return ""; }
+}
+
+/** Complete the email-link sign-in. The user ends up signed in with a verified
+ *  email. Returns a fresh ID token. */
+export async function firebaseCompleteSetupLink(email) {
+  const auth = await getAuthInstance();
+  const { signInWithEmailLink } = await import("firebase/auth");
+  const cred = await signInWithEmailLink(auth, email, window.location.href);
+  try { localStorage.removeItem(SETUP_EMAIL_KEY); } catch { /* ignore */ }
+  const idToken = await cred.user.getIdToken(true);
+  return { idToken, email: cred.user.email };
+}
+
+/** Set a password on the currently signed-in (email-link-verified) user, so they
+ *  can sign in with email+password from then on. Returns a fresh ID token. */
+export async function firebaseSetPasswordForCurrentUser(password) {
+  const auth = await getAuthInstance();
+  const { updatePassword } = await import("firebase/auth");
+  if (!auth.currentUser) throw new Error("no-current-user");
+  await updatePassword(auth.currentUser, password);
+  return { idToken: await auth.currentUser.getIdToken(true) };
+}
+
 /**
  * Resend the verification link to the currently signed-in user and sign them
  * out, so an unverified public sign-up doesn't linger in a Firebase session.

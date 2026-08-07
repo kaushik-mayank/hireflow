@@ -4,8 +4,32 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — feature-complete in code. All phases (8–15) implemented; the only items left are the two that need a real environment: run the migration against a DB copy, and `CI=true yarn build` + bundle check.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
-**Last updated:** 2026-08-05
+**Current phase:** 🔵 **Cycle 2 — feature-complete + Session 31 enhancement pack (custom stages, "hiring for", filters, recruiter first-login rework). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Last updated:** 2026-08-08
+
+---
+
+## Session 31 — 2026-08-08 — Owner-requested enhancements (6 items)
+
+All additive; existing behaviour preserved. Backend offline-tested (**309 pass forwards AND reverse**); frontend written but **not built here**.
+
+1. **Per-job custom stages.** Managers add extra pipeline stages (e.g. L1/L2/L3) at job create/edit on top of the defaults. Backend: `JobCreate/JobUpdate.custom_stages` (sanitised — trim/dedupe/cap 12/drop default collisions); candidate moves (single + **bulk**) validate against defaults + that job's custom stages; `get_candidate` returns the job's `custom_stages`. Frontend: JobCreate input; JobDetail/CandidateBoard/CandidateDetail render `STAGES + custom_stages` (board column colour falls back for custom stages).
+2. **"Hiring for" (company/client) on a job.** `JobCreate/JobUpdate.hiring_for`; shown on job cards, the job subtitle, and used by the filter below. Lets an agency working several clients tell jobs apart.
+3. **Company filter in the Jobs panel.** A combo (type-or-pick `<datalist>`) that filters jobs by `hiring_for`, alongside the existing title search + status dropdown.
+4. **Team-report member filter (manager).** `Reports → Team` gains an "All members / <name>" dropdown that filters every per-recruiter panel to one teammate.
+5. **Manager candidate visibility + "sourced by" filter.** Managers already see all org candidates on a job; added a **manager-only "Sourced by" filter** (teammate dropdown) on the job's candidate list plus a "by <name>" label on each row.
+6. **Recruiter first-login rework + the reported bug.**
+   - **Bug fixed (backend):** an activated recruiter with an unverified Firebase email is **no longer bounced to "verify your email"** on later logins — the verification gate now applies to public *manager* sign-ups only (recruiters are exempt; +1 test).
+   - **Flow (frontend):** first login now **verifies the email first** via a Firebase **email-link**, then shows **create-password**, then straight into the app; afterwards it's **password-only, no verification**. If email-link sign-in isn't enabled on the Firebase project, it **falls back** to setting a password directly (still no lockout). Unapproved email → professional message: *"You don't have an approved account yet. Contact your company's manager — or sign up as admin."*
+
+### Files
+- Backend: `models.py`, `routes_jobs.py`, `routes_candidates.py`, `routes_auth.py` (+ tests in `test_org_isolation.py`, `test_org_and_auth.py`).
+- Frontend: `pages/JobCreate.jsx`, `pages/Jobs.jsx`, `pages/JobDetail.jsx`, `pages/CandidateBoard.jsx`, `pages/CandidateDetail.jsx`, `components/TeamReport.jsx`, `pages/Login.jsx`, `lib/firebase.js`.
+
+### Owner action items (updated)
+1. **`CI=true yarn build`** (covers all frontend batches incl. Session 31).
+2. **Enable Firebase "Email link (passwordless sign-in)"** + authorized domains, so the recruiter verify-email step works (see `CYCLE2_RUNBOOK.md` §1). Without it the app safely falls back to create-password.
+3. Migration dry-run → `--confirm` against a DB copy (unchanged).
 
 ---
 

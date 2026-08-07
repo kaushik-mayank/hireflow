@@ -25,6 +25,14 @@ send invitation emails — admins store approved emails and users set their own
 password on first sign-in. (`APP_URL`/SMTP are still fine to keep for other uses;
 the dormant emailed-invite code in `invites.py` is reserved for a future cycle.)
 
+**Firebase console — enable email-link sign-in (for recruiter first-login):**
+In Firebase Authentication → Sign-in method, enable **Email/Password** and turn on
+**Email link (passwordless sign-in)**; add your frontend domain under **Authorized
+domains**. This powers the recruiter "verify your email → set password" step. If
+it is *not* enabled, the app **falls back** to letting an approved recruiter set a
+password directly (no hard failure) — but then the email isn't verified up front,
+so enable it for the intended flow.
+
 No new frontend env vars.
 
 ---

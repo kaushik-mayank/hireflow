@@ -17,6 +17,7 @@ export default function Jobs() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [companyFilter, setCompanyFilter] = useState(""); // "hiring for" combo (type or pick)
   const navigate = useNavigate();
 
   const load = () => {
@@ -38,10 +39,12 @@ export default function Jobs() {
     }
   };
 
+  const companies = [...new Set(jobs.map((j) => j.hiring_for).filter(Boolean))].sort();
   const filtered = jobs.filter((j) => {
     const okStatus = statusFilter === "all" || j.status === statusFilter;
     const okSearch = j.title.toLowerCase().includes(search.toLowerCase());
-    return okStatus && okSearch;
+    const okCompany = !companyFilter.trim() || (j.hiring_for || "").toLowerCase().includes(companyFilter.trim().toLowerCase());
+    return okStatus && okSearch && okCompany;
   });
 
   const statusColor = (s) => (s === "active" ? "text-green bg-green-light" : s === "paused" ? "text-amber bg-amber-light" : "text-gray-600 bg-gray-100");
@@ -69,6 +72,18 @@ export default function Jobs() {
             <option value="paused">Paused</option>
             <option value="closed">Closed</option>
           </select>
+          {/* Company/client filter — type to search or pick from the list. */}
+          <div className="relative min-w-[190px]">
+            <input
+              list="jobs-company-list" value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}
+              placeholder="Hiring for (company)…"
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white outline-none focus:border-indigo"
+              data-testid="jobs-company-filter"
+            />
+            <datalist id="jobs-company-list">
+              {companies.map((c) => <option key={c} value={c} />)}
+            </datalist>
+          </div>
         </div>
 
         {loading ? (
@@ -81,6 +96,7 @@ export default function Jobs() {
                   <div>
                     <h3 className="font-semibold text-gray-800 group-hover:text-indigo transition-colors">{j.title}</h3>
                     <p className="text-sm text-gray-600 mt-0.5">{j.department || "No department"}</p>
+                    {j.hiring_for && <p className="text-xs text-indigo mt-0.5">Hiring for {j.hiring_for}</p>}
                   </div>
                   <span className={`text-xs font-medium rounded-full px-2.5 py-1 capitalize ${statusColor(j.status)}`}>{j.status}</span>
                 </div>

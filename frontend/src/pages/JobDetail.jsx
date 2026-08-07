@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Upload, LayoutGrid, FileText, Activity, Search, Trash2, Eye, ArrowRight, CheckSquare, Users } from "lucide-react";
-import { jobsApi, candidatesApi, aiApi, assignmentsApi, apiErr } from "@/api";
+import { jobsApi, candidatesApi, aiApi, assignmentsApi, orgsApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Skeleton, EmptyState, Spinner, SourceBadge, Modal } from "@/components/ui";
 import { STAGES, fmtDate } from "@/constants";
@@ -37,9 +37,11 @@ export default function JobDetail() {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [sourcedByFilter, setSourcedByFilter] = useState("all"); // manager-only: which teammate sourced
   const [minScore, setMinScore] = useState(0);
   const [sortBy, setSortBy] = useState("score");
   const [selected, setSelected] = useState([]);
+  const [members, setMembers] = useState([]); // org teammates, for the sourced-by filter (managers)
 
   const loadCands = useCallback(() => {
     candidatesApi.listByJob(id).then((r) => setCands(r.data)).catch(() => {});
@@ -59,6 +61,12 @@ export default function JobDetail() {
   useEffect(() => {
     if (tab === "activity") jobsApi.activity(id).then((r) => setActivity(r.data)).catch(() => {});
   }, [tab, id]);
+
+  // A manager can filter candidates by which teammate sourced them, so load the
+  // org's members once we know the caller is a manager on this job.
+  useEffect(() => {
+    if (job?.access_scope === "manager") orgsApi.members().then((r) => setMembers(r.data)).catch(() => {});
+  }, [job?.access_scope]);
 
   const handleFiles = async (fileList) => {
     // Source is mandatory — block the upload until one is chosen.
@@ -155,8 +163,9 @@ export default function JobDetail() {
     const okSearch = (c.name || "").toLowerCase().includes(search.toLowerCase());
     const okStage = stageFilter === "all" || c.stage === stageFilter;
     const okSource = sourceFilter === "all" || c.source === sourceFilter;
+    const okSourcedBy = sourcedByFilter === "all" || c.sourced_by === sourcedByFilter;
     const okScore = (c.ai_score ?? 0) >= minScore;
-    return okSearch && okStage && okSource && okScore;
+    return okSearch && okStage && okSource && okSourcedBy && okScore;
   });
   view.sort((a, b) => {
     if (sortBy === "score") return (b.ai_score ?? -1) - (a.ai_score ?? -1);
@@ -192,11 +201,25 @@ export default function JobDetail() {
   const canMove = can("can_move_stage");
   const NO_PERM = "Your admin hasn't given you this permission on this job.";
 
+  // Default pipeline plus any extra stages this job's admin added (L1/L2/…).
+  const effectiveStages = [...STAGES, ...(job.custom_stages || [])];
+  // Map a teammate id → display name, for the manager-only "sourced by" filter/label.
+  const memberName = (uid) => {
+    const m = members.find((x) => x.id === uid);
+    return m ? (m.name || m.email) : null;
+  };
+  const subtitleParts = [
+    job.hiring_for ? `Hiring for ${job.hiring_for}` : null,
+    job.department || "No dept",
+    `${job.openings_needed} opening(s)`,
+    `${job.hired_count}/${job.openings_needed} hired`,
+  ].filter(Boolean);
+
   return (
     <Layout>
       <Topbar
         title={job.title}
-        subtitle={`${job.department || "No dept"} · ${job.openings_needed} opening(s) · ${job.hired_count}/${job.openings_needed} hired`}
+        subtitle={subtitleParts.join(" · ")}
         actions={<>
           <Button variant="ghost" onClick={() => navigate("/jobs")}><ArrowLeft size={16} /> Back</Button>
           <Button onClick={() => navigate(`/jobs/${id}/board`)} data-testid="open-board-btn"><LayoutGrid size={16} /> Kanban Board</Button>
@@ -283,12 +306,18 @@ export default function JobDetail() {
               </div>
               <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white outline-none" data-testid="cand-stage-filter">
                 <option value="all">All Stages</option>
-                {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                {effectiveStages.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
               <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white outline-none" data-testid="cand-source-filter">
                 <option value="all">All Sources</option>
                 {CANDIDATE_SOURCES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
+              {isManager && members.length > 0 && (
+                <select value={sourcedByFilter} onChange={(e) => setSourcedByFilter(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white outline-none" data-testid="cand-sourcedby-filter">
+                  <option value="all">Sourced by: anyone</option>
+                  {members.filter((m) => m.status !== "approved").map((m) => <option key={m.id} value={m.id}>{m.name || m.email}</option>)}
+                </select>
+              )}
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 Min score <input type="range" min="0" max="100" value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} className="accent-indigo" data-testid="cand-score-slider" /> <span className="w-7 font-medium">{minScore}</span>
               </div>
@@ -312,7 +341,7 @@ export default function JobDetail() {
                   data-testid="bulk-stage-select"
                 >
                   <option value="" disabled>{canMove ? "Move to stage..." : "Moving not enabled"}</option>
-                  {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {effectiveStages.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <button onClick={() => setSelected([])} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>
               </div>
@@ -338,6 +367,9 @@ export default function JobDetail() {
                       </div>
                       <div className="flex flex-wrap items-center gap-1 mt-1">
                         <SourceBadge source={c.source} />
+                        {isManager && c.sourced_by && memberName(c.sourced_by) && (
+                          <span className="text-[11px] text-gray-400">by {memberName(c.sourced_by)}</span>
+                        )}
                         {(c.matched_skills || []).slice(0, 2).map((s) => <Pill key={s} tone="green">{s}</Pill>)}
                         {(c.missing_skills || []).slice(0, 1).map((s) => <Pill key={s} tone="red">{s}</Pill>)}
                       </div>
