@@ -29,6 +29,25 @@ export default function CandidateDetail() {
   const [structured, setStructured] = useState(null);
   const [structuring, setStructuring] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  // Direct PDF download (server-generated), rather than the browser print dialog.
+  const downloadResume = async () => {
+    setDownloading(true);
+    try {
+      const res = await candidatesApi.resumePdf(id);
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${cand?.name || "resume"} - Resume.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(apiErr(err, "Couldn't download the resume. Please try again."));
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const openResumeView = async () => {
     setViewerOpen(true);
@@ -124,10 +143,12 @@ export default function CandidateDetail() {
   // all true; undefined defaults to allowed so legacy responses never lock out).
   const perms = cand.effective_permissions || {};
   const can = (flag) => perms[flag] !== false;
-  const canMove = can("can_move_stage");
-  const canReject = can("can_reject_candidates");
+  // A closed job is read-only for stage changes; viewing (incl. AI aids) stays.
+  const closed = cand.job?.status === "closed";
+  const canMove = can("can_move_stage") && !closed;
+  const canReject = can("can_reject_candidates") && !closed;
   const canUseAI = can("can_use_ai");
-  const NO_PERM = "Your admin hasn't given you this permission on this job.";
+  const NO_PERM = closed ? "This job is closed, so it's read-only." : "Your admin hasn't given you this permission on this job.";
   const stages = [...STAGES, ...(cand.job?.custom_stages || [])];
 
   return (
@@ -241,7 +262,7 @@ export default function CandidateDetail() {
                 <option value="" disabled>{canMove ? "Move to other stage..." : "Moving not enabled"}</option>
                 {stages.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
-              {!canMove && <p className="text-xs text-gray-400 mt-2">Moving candidates isn't enabled for you on this job.</p>}
+              {!canMove && <p className="text-xs text-gray-400 mt-2">{closed ? "This job is closed — candidate stages can't be changed." : "Moving candidates isn't enabled for you on this job."}</p>}
             </Card>
 
             <Card className="p-5">
@@ -294,8 +315,8 @@ export default function CandidateDetail() {
         title="Resume"
         width="max-w-3xl"
         footer={structured && (
-          <Button onClick={() => window.print()} data-testid="resume-download">
-            <Download size={15} /> Download PDF
+          <Button onClick={downloadResume} disabled={downloading} data-testid="resume-download">
+            <Download size={15} /> {downloading ? "Preparing…" : "Download PDF"}
           </Button>
         )}
       >
@@ -310,14 +331,6 @@ export default function CandidateDetail() {
           <p className="text-sm text-gray-500 py-8 text-center">Could not build the formatted resume.</p>
         )}
       </Modal>
-
-      {/* Hidden clone used only for printing, so "Save as PDF" outputs just the
-          resume regardless of the modal chrome around it. */}
-      {structured && (
-        <div className="print-only">
-          <ResumeView data={structured} />
-        </div>
-      )}
 
       {/* Email modal — fully editable so the recruiter can tweak the draft
           before copying. Fields are controlled, so the copied text reflects

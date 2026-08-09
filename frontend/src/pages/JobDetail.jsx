@@ -195,12 +195,15 @@ export default function JobDetail() {
 
   // Effective permissions for the caller on this job (managers get all true).
   // Undefined flags default to allowed so legacy responses never lock anyone out.
+  // A closed job is read-only: no uploads, analysis or stage changes (it stays
+  // fully viewable). This mirrors the backend guard on closed jobs.
+  const closed = job.status === "closed";
   const perms = job.effective_permissions || {};
   const can = (flag) => perms[flag] !== false;
-  const canUpload = can("can_upload_candidates");
-  const canUseAI = can("can_use_ai");
-  const canMove = can("can_move_stage");
-  const NO_PERM = "Your admin hasn't given you this permission on this job.";
+  const canUpload = can("can_upload_candidates") && !closed;
+  const canUseAI = can("can_use_ai") && !closed;
+  const canMove = can("can_move_stage") && !closed;
+  const NO_PERM = closed ? "This job is closed, so it's read-only." : "Your admin hasn't given you this permission on this job.";
 
   // Default pipeline plus any extra stages this job's admin added (L1/L2/…).
   const effectiveStages = [...STAGES, ...(job.custom_stages || [])];
@@ -227,6 +230,11 @@ export default function JobDetail() {
         </>}
       />
       <PageBody>
+        {closed && (
+          <div className="mb-5 flex items-start gap-2.5 rounded-lg bg-amber-light/60 px-4 py-3 text-sm text-[#92400e]" data-testid="job-closed-banner">
+            This job is closed. You can view its candidates and data, but you can't add candidates, run analysis, or change stages.
+          </div>
+        )}
         {/* Upload zone */}
         <Card className="p-5 mb-5">
           <div className="flex items-center justify-between mb-3">
@@ -382,7 +390,7 @@ export default function JobDetail() {
                     <StageBadge stage={c.stage} />
                     <div className="flex gap-1">
                       <button onClick={() => openCandidate(c.id)} className="p-2 text-gray-500 hover:text-indigo hover:bg-indigo-light rounded-lg" title="View profile" data-testid={`cand-view-${c.id}`}><Eye size={16} /></button>
-                      <button onClick={() => removeCand(c.id)} className="p-2 text-gray-500 hover:text-coral hover:bg-coral-light rounded-lg" title="Delete" data-testid={`cand-delete-${c.id}`}><Trash2 size={16} /></button>
+                      <button onClick={() => removeCand(c.id)} disabled={closed} title={closed ? "This job is closed." : "Delete"} className="p-2 text-gray-500 hover:text-coral hover:bg-coral-light rounded-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-500" data-testid={`cand-delete-${c.id}`}><Trash2 size={16} /></button>
                     </div>
                   </Card>
                 ))}

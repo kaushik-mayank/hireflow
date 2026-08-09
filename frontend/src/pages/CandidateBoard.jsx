@@ -22,7 +22,8 @@ export default function CandidateBoard() {
   // Permission gate from the job's effective_permissions (managers all true;
   // undefined defaults to allowed so legacy responses never lock anyone out).
   const perms = job?.effective_permissions || {};
-  const canMove = perms.can_move_stage !== false;
+  const closed = job?.status === "closed";       // closed jobs are read-only
+  const canMove = perms.can_move_stage !== false && !closed;
   // The board is the shortlisting-onward workflow: it starts at "Shortlisted"
   // (candidates before that don't appear here), then the rest of the default
   // pipeline, then any extra stages this job's admin added.
@@ -72,7 +73,9 @@ export default function CandidateBoard() {
         {!canMove && (
           <div className="px-5 pt-3">
             <div className="bg-amber-light/60 text-[#92400e] text-xs rounded-lg px-3 py-2">
-              You can view this pipeline, but moving candidates isn't enabled for you on this job.
+              {closed
+                ? "This job is closed — the board is read-only. You can view candidates but can't move them."
+                : "You can view this pipeline, but moving candidates isn't enabled for you on this job."}
             </div>
           </div>
         )}
@@ -144,8 +147,9 @@ function CandidatePanel({ candidate, job, onClose, onUpdated, navigate }) {
 
   const perms = job?.effective_permissions || {};
   const can = (f) => perms[f] !== false;
-  const canMove = can("can_move_stage");
-  const canReject = can("can_reject_candidates");
+  const closed = job?.status === "closed";       // closed jobs are read-only
+  const canMove = can("can_move_stage") && !closed;
+  const canReject = can("can_reject_candidates") && !closed;
   const canUseAI = can("can_use_ai");
 
   const move = async (stage) => {

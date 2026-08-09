@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Plus, Search, Briefcase, Users, Calendar, CalendarClock, Target, Eye, Pause, Play, Ban } from "lucide-react";
 import { jobsApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
-import { Card, Button, ProgressBar, Skeleton, EmptyState } from "@/components/ui";
+import { Card, Button, ProgressBar, Skeleton, EmptyState, Modal } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import { fmtDate } from "@/constants";
 import { toast } from "sonner";
@@ -18,6 +18,7 @@ export default function Jobs() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [companyFilter, setCompanyFilter] = useState(""); // "hiring for" combo (type or pick)
+  const [closeTarget, setCloseTarget] = useState(null);   // job pending a close confirmation
   const navigate = useNavigate();
 
   const load = () => {
@@ -40,14 +41,19 @@ export default function Jobs() {
     }
   };
 
-  const closeJob = async (e, job) => {
+  const closeJob = (e, job) => {
     e.stopPropagation();
+    setCloseTarget(job); // open the confirmation modal (no browser confirm popup)
+  };
+
+  const doClose = async () => {
+    if (!closeTarget) return;
     // Closing is terminal: the job stays visible in the list marked "Closed" —
     // it is NOT deleted and its data is preserved.
-    if (!window.confirm(`Close "${job.title}"? It stays in your Jobs list marked Closed and its data is kept, but it's no longer active.`)) return;
     try {
-      await jobsApi.update(job.id, { status: "closed" });
+      await jobsApi.update(closeTarget.id, { status: "closed" });
       toast.success("Job closed");
+      setCloseTarget(null);
       load();
     } catch (err) {
       toast.error(apiErr(err));
@@ -168,6 +174,24 @@ export default function Jobs() {
           </Card>
         )}
       </PageBody>
+
+      <Modal
+        open={!!closeTarget}
+        onClose={() => setCloseTarget(null)}
+        title="Close this job?"
+        width="max-w-md"
+        footer={<>
+          <Button variant="secondary" onClick={() => setCloseTarget(null)} data-testid="close-cancel">Cancel</Button>
+          <Button variant="danger" onClick={doClose} data-testid="close-confirm">Close job</Button>
+        </>}
+      >
+        <p className="text-sm text-gray-600 leading-relaxed">
+          <span className="font-medium text-gray-800">{closeTarget?.title}</span> will be marked{" "}
+          <span className="font-medium">Closed</span>. It stays in your Jobs list and every candidate and record is
+          kept, but it stops accepting activity — you won't be able to add candidates, run analysis or change stages.
+          You'll still be able to open it and view everything.
+        </p>
+      </Modal>
     </Layout>
   );
 }

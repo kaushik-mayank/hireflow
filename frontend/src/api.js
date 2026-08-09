@@ -93,6 +93,8 @@ export const candidatesApi = {
   bulkStage: (data) => client.put(`/candidates/bulk-stage`, data),
   addNote: (id, note) => client.post(`/candidates/${id}/note`, { note }),
   remove: (id) => client.delete(`/candidates/${id}`),
+  // Direct PDF download of the candidate's resume (blob, via the auth interceptor).
+  resumePdf: (id) => client.get(`/candidates/${id}/resume.pdf`, { responseType: "blob" }),
 };
 
 // ---- AI ----

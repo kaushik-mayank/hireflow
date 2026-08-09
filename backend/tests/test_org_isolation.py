@@ -145,7 +145,7 @@ def world():
     _merge_stub("fastapi", HTTPException=_HTTPException, Depends=lambda dep=None: None,
                 APIRouter=_APIRouter, UploadFile=object, File=lambda *a, **k: None,
                 Form=lambda *a, **k: None, Query=lambda default=None, **k: default)
-    _merge_stub("fastapi.responses", PlainTextResponse=object)
+    _merge_stub("fastapi.responses", PlainTextResponse=object, Response=object)
 
     colls = {
         "jobs": FakeColl(),
@@ -443,6 +443,36 @@ def test_move_stage_allowed_with_permission(world):
     _reset(world, jobs=[JOB_A], candidates=[CAND_A], assignments=[_assign({})])
     out = run(world.cand_r.update_stage("cand-A", _ns(stage="Shortlisted", note=None), RECRUITER_A))
     assert out["success"] is True
+
+
+# ---- closed jobs are read-only (Cycle 3) ----
+
+def test_upload_blocked_on_closed_job(world):
+    _reset(world, jobs=[{**JOB_A, "status": "closed"}], candidates=[], assignments=[_assign({})])
+    with pytest.raises(world.exc) as e:
+        run(world.cand_r.upload_resumes("job-A", files=[], source="LinkedIn", user=RECRUITER_A))
+    assert e.value.status_code == 409
+
+
+def test_move_stage_blocked_on_closed_job(world):
+    _reset(world, jobs=[{**JOB_A, "status": "closed"}], candidates=[CAND_A], assignments=[_assign({})])
+    with pytest.raises(world.exc) as e:
+        run(world.cand_r.update_stage("cand-A", _ns(stage="Shortlisted", note=None), RECRUITER_A))
+    assert e.value.status_code == 409
+
+
+def test_rank_blocked_on_closed_job(world):
+    _reset(world, jobs=[{**JOB_A, "status": "closed"}], candidates=[CAND_A], assignments=[_assign({})])
+    with pytest.raises(world.exc) as e:
+        run(world.ai_r.rank_candidates(_ns(job_id="job-A", reanalyze=False, candidate_ids=None), RECRUITER_A))
+    assert e.value.status_code == 409
+
+
+def test_closed_job_still_readable(world):
+    # A closed job is not deleted and can still be opened/viewed.
+    _reset(world, jobs=[{**JOB_A, "status": "closed"}], candidates=[CAND_A], assignments=[_assign({})])
+    out = run(world.jobs_r.get_job("job-A", RECRUITER_A))
+    assert out["id"] == "job-A" and out["status"] == "closed"
 
 
 def test_move_stage_accepts_a_jobs_custom_stage(world):

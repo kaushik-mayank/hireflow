@@ -3,11 +3,13 @@ import re
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import Response
 
 from database import jobs, candidates, stage_transitions, activity_events, UPLOAD_DIR
 from auth import get_current_user
 from models import StageUpdate, NoteUpdate, BulkStageUpdate
 import resume_parser
+import resume_pdf
 import permissions
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
@@ -57,6 +59,7 @@ async def upload_resumes(
     user: dict = Depends(get_current_user),
 ):
     access = await permissions.resolve_job_access(user, job_id)
+    permissions.ensure_job_open(access)
     permissions.require_permission(access, "can_upload_candidates")
 
     # Source is mandatory (the UI enforces it too); reject a blank value.
@@ -143,7 +146,7 @@ async def get_candidate(candidate_id: str, user: dict = Depends(get_current_user
     ).sort("moved_at", -1).to_list(500)
     cand["job"] = {
         "id": job["id"], "title": job["title"], "department": job.get("department"),
-        "custom_stages": job.get("custom_stages") or [],
+        "custom_stages": job.get("custom_stages") or [], "status": job.get("status"),
     }
     cand["transitions"] = transitions
     # The caller's effective permissions on this candidate's job, so the UI can
@@ -151,6 +154,18 @@ async def get_candidate(candidate_id: str, user: dict = Depends(get_current_user
     cand["effective_permissions"] = access.permissions
     cand["access_scope"] = access.scope
     return cand
+
+
+@router.get("/{candidate_id}/resume.pdf")
+async def download_resume_pdf(candidate_id: str, user: dict = Depends(get_current_user)):
+    """Directly download the candidate's resume as a PDF (same content as the
+    on-screen View Resume). Uses the cached structured resume when present, else
+    falls back to the raw text so the file is never empty."""
+    cand, _access = await permissions.resolve_candidate_access(user, candidate_id)
+    pdf_bytes = resume_pdf.build_resume_pdf(cand.get("resume_structured") or {}, cand)
+    safe_name = (cand.get("name") or "resume").strip().replace('"', "").replace("\n", " ") or "resume"
+    headers = {"Content-Disposition": f'attachment; filename="{safe_name} - Resume.pdf"'}
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 async def _move_stage(cand: dict, to_stage: str, note: str, user: dict):
@@ -184,6 +199,7 @@ def _allowed_stages(job: dict) -> list:
 @router.put("/{candidate_id}/stage")
 async def update_stage(candidate_id: str, body: StageUpdate, user: dict = Depends(get_current_user)):
     cand, access = await permissions.resolve_candidate_access(user, candidate_id)
+    permissions.ensure_job_open(access)
     if body.stage not in _allowed_stages(access.job):
         raise HTTPException(status_code=400, detail="Invalid stage")
     # Rejecting is a separate, more sensitive permission from an ordinary move.
@@ -236,6 +252,8 @@ async def bulk_update_stage(body: BulkStageUpdate, user: dict = Depends(get_curr
         access = access_by_job[job_id]
         if access is None:
             continue
+        if access.job.get("status") == "closed":
+            continue  # closed jobs are read-only — skip their candidates
         if (access.scope == "assigned"
                 and not access.can("can_view_team_candidates")
                 and c.get("sourced_by") != user["id"]):

@@ -139,6 +139,7 @@ async def _rank_batch(jd_text: str, batch: list, jd_source: str) -> list:
 @router.post("/rank")
 async def rank_candidates(body: RankRequest, user: dict = Depends(get_current_user)):
     access = await permissions.resolve_job_access(user, body.job_id)
+    permissions.ensure_job_open(access)
     permissions.require_permission(access, "can_use_ai")
     jd = await permissions.resolve_jd(access, user["id"])
     if not jd["jd_text"]:

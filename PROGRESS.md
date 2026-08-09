@@ -4,8 +4,26 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🟣 **Cycle 3 implemented (candidate/resume, Kanban, analysis, job lifecycle). Cycle 2 is CLOSED (owner-verified). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🟣 **Cycle 3 + Session 34 fixes (close-job modal, closed=read-only, direct PDF download). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-09
+
+---
+
+## Session 34 — 2026-08-09 — Cycle 3 fixes from owner testing (3 items)
+
+Backend offline-tested (**319 pass forwards AND reverse**, +4); frontend written, not built here.
+
+1. **Close-job confirmation is now a proper modal.** Replaced the raw `window.confirm(...)` on the Jobs card with the existing `Modal` component and professional SaaS copy ("… will be marked Closed. It stays in your Jobs list and every candidate and record is kept, but it stops accepting activity …"). `Jobs.jsx` (`closeTarget` state + `doClose`).
+2. **Closed jobs are read-only (not just labelled).** Backend now blocks writes on a closed job — `permissions.ensure_job_open(access)` raises **409** and is called in `upload_resumes`, `update_stage`, `rank`; `bulk_update_stage` skips closed-job candidates; `get_candidate` returns the job `status`. The job stays fully **viewable** (get_job/board/candidate all work). Frontend surfaces it (existing banner/notification style): a **"This job is closed"** banner on `JobDetail`, disabled upload/analyse/bulk-move/delete; the Kanban board + panel become view-only with a closed banner; `CandidateDetail` disables stage moves with a closed note. **Resume viewing and other read-only AI aids still work on closed jobs.**
+3. **Resume "Download PDF" now downloads directly** (no browser print/Save-as-PDF dialog). New backend endpoint **`GET /candidates/{id}/resume.pdf`** generates the PDF server-side from the cached structured resume (falls back to raw text) using **reportlab** (already a dependency; imported lazily so the offline test suite stays reportlab-free). Frontend downloads the blob via `candidatesApi.resumePdf` and removed the old `window.print()` path + print-only clone. New `resume_pdf.py` mirrors the `ResumeView` sections.
+
+### Files
+- Backend: `permissions.py` (ensure_job_open), `routes_candidates.py` (guards + `status` in job payload + `resume.pdf` endpoint), `routes_ai.py` (rank guard), **`resume_pdf.py`** (NEW). Tests: `test_org_isolation.py` (+4: upload/move/rank blocked on closed, closed-job still readable; `fastapi.responses` stub gained `Response`).
+- Frontend: `api.js` (resumePdf), `pages/Jobs.jsx` (close modal + Close/read-only), `pages/JobDetail.jsx`, `pages/CandidateBoard.jsx`, `pages/CandidateDetail.jsx` (download + closed read-only).
+
+### Honest notes
+- **No `CI=true yarn build`** here (no Node) — static-checked (no unused imports); owner must build + deploy.
+- PDF is generated server-side with reportlab: the layout mirrors the on-screen `ResumeView` sections but is a fresh PDF (not a pixel copy of the HTML), and needs one manual QA after deploy (View Resume → Download PDF downloads a file directly; closed job blocks upload/move and shows the banner; close-job modal reads professionally).
 
 ---
 

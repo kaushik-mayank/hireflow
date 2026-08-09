@@ -148,6 +148,13 @@ def require_permission(access: JobAccess, flag: str) -> None:
         raise HTTPException(status_code=403, detail=_DENIED_MESSAGE.get(flag, "You don't have permission to do this."))
 
 
+def ensure_job_open(access: JobAccess) -> None:
+    """Block changes on a closed job. A closed job stays visible and readable for
+    the record, but candidates can't be added and stages can't be changed."""
+    if access.job.get("status") == "closed":
+        raise HTTPException(status_code=409, detail="This job is closed, so it's read-only. You can still view its candidates and data.")
+
+
 _CANDIDATE_NOT_FOUND = "Candidate not found"
 
 
