@@ -23,8 +23,11 @@ export default function CandidateBoard() {
   // undefined defaults to allowed so legacy responses never lock anyone out).
   const perms = job?.effective_permissions || {};
   const canMove = perms.can_move_stage !== false;
-  // Default pipeline plus any extra stages this job's admin added.
-  const boardStages = [...STAGES, ...(job?.custom_stages || [])];
+  // The board is the shortlisting-onward workflow: it starts at "Shortlisted"
+  // (candidates before that don't appear here), then the rest of the default
+  // pipeline, then any extra stages this job's admin added.
+  const _start = STAGES.indexOf("Shortlisted");
+  const boardStages = [...(_start >= 0 ? STAGES.slice(_start) : STAGES), ...(job?.custom_stages || [])];
 
   const load = useCallback(() => {
     Promise.all([jobsApi.get(id), candidatesApi.listByJob(id)])

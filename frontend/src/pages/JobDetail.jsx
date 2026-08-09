@@ -101,11 +101,12 @@ export default function JobDetail() {
     }
   };
 
-  const analyzeAll = async () => {
+  const analyzeCandidates = async () => {
     if (!job?.jd_text) { toast.error("Add a job description first"); return; }
     setAnalyzing(true);
     try {
-      const r = await aiApi.rank(id, false);
+      // With a selection, analyse only those; otherwise analyse all applicable.
+      const r = await aiApi.rank(id, selected.length ? { candidateIds: selected } : {});
       toast.success(r.data.count ? `${r.data.count} candidate(s) analyzed by AI` : "No new candidates to analyze");
       loadCands();
     } catch (err) {
@@ -232,12 +233,16 @@ export default function JobDetail() {
             <h3 className="font-semibold text-gray-800">Upload Resumes</h3>
             <AIButton
               loading={analyzing}
-              onClick={analyzeAll}
+              onClick={analyzeCandidates}
               disabled={!canUseAI}
               title={canUseAI ? undefined : NO_PERM}
               data-testid="analyze-all-btn"
             >
-              {analyzing ? "Analyzing..." : "Analyze All Candidates"}
+              {analyzing
+                ? "Analyzing..."
+                : selected.length
+                  ? `Analyse Selected Candidates (${selected.length})`
+                  : "Analyze All Candidates"}
             </AIButton>
           </div>
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Briefcase, Users, Calendar, CalendarClock, Target, Eye, Pause, Play } from "lucide-react";
+import { Plus, Search, Briefcase, Users, Calendar, CalendarClock, Target, Eye, Pause, Play, Ban } from "lucide-react";
 import { jobsApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Button, ProgressBar, Skeleton, EmptyState } from "@/components/ui";
@@ -29,10 +29,25 @@ export default function Jobs() {
 
   const toggleStatus = async (e, job) => {
     e.stopPropagation();
+    // Pause ↔ reactivate. A paused job is temporary (not closed, not deleted).
     const next = job.status === "active" ? "paused" : "active";
     try {
       await jobsApi.update(job.id, { status: next });
       toast.success(`Job ${next === "active" ? "reactivated" : "paused"}`);
+      load();
+    } catch (err) {
+      toast.error(apiErr(err));
+    }
+  };
+
+  const closeJob = async (e, job) => {
+    e.stopPropagation();
+    // Closing is terminal: the job stays visible in the list marked "Closed" —
+    // it is NOT deleted and its data is preserved.
+    if (!window.confirm(`Close "${job.title}"? It stays in your Jobs list marked Closed and its data is kept, but it's no longer active.`)) return;
+    try {
+      await jobsApi.update(job.id, { status: "closed" });
+      toast.success("Job closed");
       load();
     } catch (err) {
       toast.error(apiErr(err));
@@ -127,10 +142,15 @@ export default function Jobs() {
 
                 <div className="flex gap-2 mt-4">
                   <Button variant="secondary" className="flex-1" onClick={(e) => { e.stopPropagation(); navigate(`/jobs/${j.id}`); }} data-testid={`job-view-${j.id}`}><Eye size={14} /> View</Button>
-                  {(isManager || j.origin === "personal") && (
-                    <Button variant="ghost" onClick={(e) => toggleStatus(e, j)} data-testid={`job-toggle-${j.id}`}>
-                      {j.status === "active" ? <Pause size={14} /> : <Play size={14} />}
-                    </Button>
+                  {(isManager || j.origin === "personal") && j.status !== "closed" && (
+                    <>
+                      <Button variant="ghost" onClick={(e) => toggleStatus(e, j)} title={j.status === "active" ? "Pause job" : "Reactivate job"} data-testid={`job-toggle-${j.id}`}>
+                        {j.status === "active" ? <Pause size={14} /> : <Play size={14} />}
+                      </Button>
+                      <Button variant="ghost" onClick={(e) => closeJob(e, j)} title="Close job" data-testid={`job-close-${j.id}`}>
+                        <Ban size={14} className="text-coral" />
+                      </Button>
+                    </>
                   )}
                 </div>
               </Card>

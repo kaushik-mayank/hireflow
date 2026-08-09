@@ -152,6 +152,9 @@ class BulkStageUpdate(BaseModel):
 class RankRequest(BaseModel):
     job_id: str
     reanalyze: bool = False
+    # When present, analyse only these candidates (the "Analyse Selected" action).
+    # When omitted, analyse all applicable candidates on the job.
+    candidate_ids: Optional[List[str]] = None
 
 
 class EnhanceJDRequest(BaseModel):

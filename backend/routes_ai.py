@@ -147,7 +147,11 @@ async def rank_candidates(body: RankRequest, user: dict = Depends(get_current_us
     # Only rank candidates the caller can see (own sourced unless manager /
     # can_view_team_candidates).
     query = {"job_id": body.job_id, **permissions.candidate_scope_filter(access, user)}
-    if not body.reanalyze:
+    if body.candidate_ids:
+        # "Analyse Selected": just the chosen candidates (re-analysing is fine).
+        query["id"] = {"$in": body.candidate_ids}
+    elif not body.reanalyze:
+        # "Analyse All": only the ones not yet analysed.
         query["analyzed_at"] = None
     cands = await candidates.find(query, {"_id": 0}).to_list(5000)
     if not cands:
@@ -238,8 +242,13 @@ async def structure_resume(body: StructureRequest, user: dict = Depends(get_curr
     Generated once by the AI, then cached on the candidate record, so a resume
     is only ever parsed the first time someone views it — the cost-efficient
     path. Pass refresh=true to regenerate.
+
+    Viewing a resume is NOT gated by `can_use_ai`: it's the sole resume view
+    (Cycle 3 consolidated "Formatted View" into "View Resume"), so anyone who can
+    open the candidate must be able to see it. The generative AI *tools* (rank,
+    questions, summary, email, compare) remain gated.
     """
-    cand, access, _jd = await _get_owned_candidate(body.candidate_id, user)
+    cand, access = await permissions.resolve_candidate_access(user, body.candidate_id)
 
     if cand.get("resume_structured") and not body.refresh:
         return {"structured": cand["resume_structured"], "cached": True}

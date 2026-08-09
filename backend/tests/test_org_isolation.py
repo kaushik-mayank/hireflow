@@ -475,7 +475,7 @@ def test_create_job_stores_hiring_for_and_clean_custom_stages(world):
 def test_rank_cross_org_is_404(world):
     _reset(world, jobs=[JOB_A], candidates=[CAND_A])
     with pytest.raises(world.exc) as e:
-        run(world.ai_r.rank_candidates(_ns(job_id="job-A", reanalyze=False), MANAGER_B))
+        run(world.ai_r.rank_candidates(_ns(job_id="job-A", reanalyze=False, candidate_ids=None), MANAGER_B))
     assert e.value.status_code == 404
 
 
@@ -487,9 +487,25 @@ def test_rank_denied_without_can_use_ai(world):
         assignments=[{"id": "as1", "org_id": "org-A", "job_id": "job-A", "user_id": "rec-A", "status": "active", "permissions": {"can_use_ai": False}}],
     )
     with pytest.raises(world.exc) as e:
-        run(world.ai_r.rank_candidates(_ns(job_id="job-A", reanalyze=False), RECRUITER_A))
+        run(world.ai_r.rank_candidates(_ns(job_id="job-A", reanalyze=False, candidate_ids=None), RECRUITER_A))
     assert e.value.status_code == 403  # permission denial, human message
     assert "can_use_ai" not in (e.value.detail or "")
+
+
+def test_rank_selected_candidates_runs(world):
+    # "Analyse Selected": passing candidate_ids scopes to them and doesn't error.
+    _reset(world, jobs=[JOB_A], candidates=[CAND_A], assignments=[_assign({})])
+    out = run(world.ai_r.rank_candidates(_ns(job_id="job-A", reanalyze=False, candidate_ids=["cand-A"]), RECRUITER_A))
+    assert "count" in out
+
+
+def test_view_resume_not_gated_by_can_use_ai(world):
+    # Cycle 3: resume viewing (structure) is the sole resume view, so it must NOT
+    # require can_use_ai — otherwise a recruiter without AI loses resume access.
+    _reset(world, jobs=[JOB_A], candidates=[{**CAND_A, "resume_text": "Jane Doe, nurse"}],
+           assignments=[_assign({"can_use_ai": False})])
+    out = run(world.ai_r.structure_resume(_ns(candidate_id="cand-A", refresh=False), RECRUITER_A))
+    assert "structured" in out  # no 403
 
 
 # ===========================================================================

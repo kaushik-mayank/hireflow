@@ -97,7 +97,9 @@ export const candidatesApi = {
 
 // ---- AI ----
 export const aiApi = {
-  rank: (jobId, reanalyze = false) => client.post("/ai/rank", { job_id: jobId, reanalyze }),
+  // Analyse all applicable candidates, or only `candidateIds` when provided.
+  rank: (jobId, { reanalyze = false, candidateIds } = {}) =>
+    client.post("/ai/rank", { job_id: jobId, reanalyze, candidate_ids: candidateIds }),
   enhanceJD: (jd_text, title) => client.post("/ai/enhance-jd", { jd_text, title }),
   questions: (candidate_id) => client.post("/ai/questions", { candidate_id }),
   email: (candidate_id, email_type) => client.post("/ai/email", { candidate_id, email_type }),

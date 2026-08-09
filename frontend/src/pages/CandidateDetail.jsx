@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Mail, Phone, ChevronDown, ChevronUp, Sparkles, FileText, GitCompare, MessageSquareText, Send, XCircle, Linkedin, Github, Link as LinkIcon, LayoutTemplate, Printer } from "lucide-react";
+import { ArrowLeft, Mail, Phone, Sparkles, FileText, GitCompare, MessageSquareText, Send, XCircle, Linkedin, Github, Link as LinkIcon, Download } from "lucide-react";
 import { candidatesApi, aiApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Button, AIButton, ScoreBadge, StageBadge, Avatar, Pill, Modal, Spinner, Skeleton, SourceBadge } from "@/components/ui";
@@ -13,7 +13,6 @@ export default function CandidateDetail() {
   const navigate = useNavigate();
   const [cand, setCand] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [resumeOpen, setResumeOpen] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [siblings, setSiblings] = useState([]);
 
@@ -191,18 +190,16 @@ export default function CandidateDetail() {
               )}
             </Card>
 
-            {/* Resume preview */}
+            {/* Resume */}
             <Card className="p-5">
               <div className="flex items-center justify-between gap-3">
-                <button onClick={() => setResumeOpen(!resumeOpen)} className="flex items-center gap-2 font-semibold text-gray-800" data-testid="resume-toggle">
+                <div className="flex items-center gap-2 font-semibold text-gray-800">
                   <FileText size={16} /> Resume {cand.pdf_original_name && <span className="text-xs text-gray-400 font-normal">({cand.pdf_original_name})</span>}
-                  {resumeOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                </button>
-                <Button variant="secondary" className="!py-1.5 !px-3 !text-xs" onClick={openResumeView} disabled={!canUseAI} title={canUseAI ? undefined : NO_PERM} data-testid="resume-formatted">
-                  <LayoutTemplate size={14} /> Formatted view
+                </div>
+                <Button variant="secondary" className="!py-1.5 !px-3 !text-xs" onClick={openResumeView} data-testid="resume-view">
+                  <FileText size={14} /> View Resume
                 </Button>
               </div>
-              {resumeOpen && <pre className="mt-4 whitespace-pre-wrap font-mono text-xs text-gray-600 leading-relaxed max-h-96 overflow-y-auto bg-gray-50 rounded-lg p-4">{cand.resume_text}</pre>}
             </Card>
 
             {/* AI result panels */}
@@ -290,15 +287,15 @@ export default function CandidateDetail() {
         </div>
       </PageBody>
 
-      {/* Formatted resume viewer (on-screen). */}
+      {/* Resume viewer (on-screen). */}
       <Modal
         open={viewerOpen}
         onClose={() => setViewerOpen(false)}
-        title="Formatted Resume"
+        title="Resume"
         width="max-w-3xl"
         footer={structured && (
-          <Button onClick={() => window.print()} data-testid="resume-print">
-            <Printer size={15} /> Print / Save PDF
+          <Button onClick={() => window.print()} data-testid="resume-download">
+            <Download size={15} /> Download PDF
           </Button>
         )}
       >

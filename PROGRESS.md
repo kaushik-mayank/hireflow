@@ -4,8 +4,41 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🔵 **Cycle 2 — Session 32 fixes (personal jobs for recruiters, target-label wording, candidate-page custom stages, get_candidate commit). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
-**Last updated:** 2026-08-08
+**Current phase:** 🟣 **Cycle 3 implemented (candidate/resume, Kanban, analysis, job lifecycle). Cycle 2 is CLOSED (owner-verified). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Last updated:** 2026-08-09
+
+---
+
+## Session 33 — 2026-08-09 — Cycle 3 (candidate/resume, Kanban, analysis, job lifecycle)
+
+**Cycle 2 is CLOSED** — owner reviewed and verified. Cycle 3 read `PROJECT_PLAN_CYCLE2.md` (baseline) + this PROGRESS (source of truth) first, then implemented the smallest safe changes. Backend offline-tested (**315 pass forwards AND reverse**, +2); frontend written, **not built here** (no Node).
+
+### 1. Resume view consolidated → one **"View Resume"** + PDF download
+- `CandidateDetail.jsx`: removed the old raw-text toggle (`resumeOpen`/`<pre>`); the single **"View Resume"** button opens the existing formatted viewer (`ResumeView` via `POST /ai/structure`, cached). Modal title "Formatted Resume" → **"Resume"**; footer "Print / Save PDF" → **"Download PDF"** (unchanged mechanism: `window.print()` on the print-only `ResumeView` clone → the browser's *Save as PDF*; no new dependency). Nothing is labelled "Formatted View" anymore. Removed now-unused icons (`ChevronDown/Up`, `LayoutTemplate`, `Printer`).
+- **Decision / important:** the `structure` endpoint is **no longer gated by `can_use_ai`** (`routes_ai.structure_resume` now uses `resolve_candidate_access` directly). Rationale: since this is the *sole* resume view, gating it would strip resume access from a recruiter without the AI flag — a regression. The generative AI **tools** (rank / questions / summary / email / compare) stay gated. Reuses the existing `ResumeView` design — no new resume UI.
+
+### 2. Kanban starts at **Shortlisted** + admin-defined stages
+- `CandidateBoard.jsx`: board columns now start at `"Shortlisted"` (`STAGES.slice(indexOf("Shortlisted"))`) then the rest of the default pipeline, then the job's `custom_stages`. Candidates before Shortlisted don't appear on the board. **Admin-added stages** reuse the **existing per-job `custom_stages`** mechanism (Session 31/32) — no new stage system. Drag + panel moves still validate against `can_move_stage`.
+
+### 3. **Analyse All** vs **Analyse Selected**
+- `RankRequest.candidate_ids` (optional); `routes_ai.rank_candidates` scopes to those ids (re-analysing them) when present, else the existing "all un-analysed" behaviour. `aiApi.rank(jobId, { candidateIds })`.
+- `JobDetail.jsx`: the top analyse button reads **"Analyze All Candidates"** with no selection, and **"Analyse Selected Candidates (N)"** when candidates are ticked — sending only the selected ids. Existing per-candidate visibility/permission scoping preserved.
+
+### 4. Job lifecycle — **Pause** and **Close** (close ≠ delete)
+- Backend already supported `status` `active|paused|closed` and never deletes on close; **no backend change needed**. `Jobs.jsx`: the card now offers **Pause/Reactivate** (temporary) and a distinct **Close** action (terminal, with confirm). **Closed jobs stay in the Jobs panel** marked "Closed" (list query has no status filter; the status dropdown already has "Closed"); closed cards show View only (no pause/close). Data preserved.
+
+### 5. Kanban on the **User (recruiter) side** — already available, verified
+- No code change required. The board route `/jobs/:id/board` is a `PrivateRoute` (not manager-gated), the "Kanban Board" button in `JobDetail` is unconditional, and `CandidateBoard` gates only on `effective_permissions` (not role). So recruiters already reach and use the **same** shared component per their permissions (drag when `can_move_stage`). Verified by inspection; documented rather than duplicated (per the "reuse existing architecture" rule).
+
+### Files
+- Backend: `models.py` (RankRequest), `routes_ai.py` (rank candidate_ids + ungate structure). Tests: `test_org_isolation.py` (+2: rank-selected, view-resume-ungated; existing rank bodies got `candidate_ids=None`).
+- Frontend: `api.js` (aiApi.rank), `pages/CandidateDetail.jsx`, `pages/CandidateBoard.jsx`, `pages/JobDetail.jsx`, `pages/Jobs.jsx`.
+
+### What was NOT done / honest notes
+- **No `CI=true yarn build`** here (no Node) — static-checked (no unused imports); owner must build + deploy for the changes to appear live.
+- "Download PDF" uses the browser print-to-PDF path (existing mechanism), not a bundled PDF generator — no new dependency, per the "prefer existing architecture / no unnecessary deps" rules.
+- Board candidate **count** in its subtitle is still the job's total (includes pre-shortlist) — left unchanged to avoid touching unrelated UI.
+- Backend suite verified; frontend requires the owner's manual QA (resume view + PDF, board-from-Shortlisted for admin **and** user, analyse all/selected, pause vs close, closed-stays-listed).
 
 ---
 
