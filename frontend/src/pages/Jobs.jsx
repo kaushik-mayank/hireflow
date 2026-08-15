@@ -78,7 +78,8 @@ export default function Jobs() {
         actions={<Button onClick={() => navigate("/jobs/create")} data-testid="jobs-create-btn"><Plus size={16} /> {isManager ? "Create New Job" : "Create My Job"}</Button>}
       />
       <PageBody>
-        <div className="flex items-center gap-3 mb-5">
+        {/* Filters stay pinned below the Topbar while the jobs list scrolls. */}
+        <div className="sticky z-10 bg-gray-50 py-3 mb-2 flex items-center gap-3" style={{ top: "var(--topbar-h, 0px)" }}>
           <div className="relative flex-1 max-w-xs">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input

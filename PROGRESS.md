@@ -4,8 +4,36 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🟣 **Cycle 3 + Session 34 fixes (close-job modal, closed=read-only, direct PDF download). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
-**Last updated:** 2026-08-09
+**Current phase:** 🟢 **Cycle 4 — sticky controls / large-list UX polish (frontend-only). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Last updated:** 2026-08-15
+
+---
+
+## Session 35 — 2026-08-15 — Cycle 4: sticky controls for large candidate/data lists (UX polish)
+
+**Frontend-only, no backend change** (319 offline tests unchanged). No redesign — same components, styling and behaviour; only positioning changed so key controls stay reachable while scrolling long lists.
+
+### Enabling infra (additive, no visual change)
+- **`components/Layout.jsx` — `Topbar`** now publishes its own height as a CSS variable **`--topbar-h`** on `:root` (via a `ResizeObserver`). This lets any page pin a sub-header directly below the (already sticky) Topbar with `top: var(--topbar-h)` — robust across pages, no hard-coded pixel offsets. Purely additive; the Topbar looks and behaves exactly as before.
+
+### Job Panel (`pages/JobDetail.jsx`) — the primary request
+- The **analyse action moved from the Upload card into the candidate filters row** (kept its exact `AIButton` design + "Analyze All / Analyse Selected (N)" behaviour), so it sits with the filters.
+- **Tabs + filters + the analyse action + the bulk-move bar are now wrapped in one sticky container** that pins just below the Topbar (`sticky; top: var(--topbar-h)`, page-coloured background) while the **candidate list scrolls beneath**. The **Upload zone scrolls away** as intended (not sticky). Everything else (candidate cards, JD/Team/Activity tabs, permissions, closed-job read-only) is unchanged.
+
+### Broader audit — same pattern on the other high-volume, filterable list pages
+Made the **filter/search bars sticky** (pinned below the Topbar while the list scrolls) on:
+- **`pages/Jobs.jsx`** (search + status + "hiring for" combo),
+- **`pages/admin/AdminUsers.jsx`** (search + role + status),
+- **`pages/admin/AdminResumes.jsx`** (search + pagination),
+- **`pages/admin/AdminFeedback.jsx`** (status + type + pagination).
+
+### Deliberately NOT changed (with reasons)
+- **Sticky table headers were not added.** Those tables live inside `overflow-x-auto` cards; making `thead` sticky against the window scroll doesn't work reliably there without imposing a fixed table height (an internal scroll region) — a structural change that risked regressions for limited benefit. The sticky **filter/search bars** deliver the core "controls stay reachable" win cleanly.
+- **Low-volume screens left alone** (Team ≤ seat limit, per-recruiter Reports tables, Dashboard) — sticky controls there would add chrome without real benefit.
+- **CandidateBoard** already uses an internal scroll region with its own sticky column headers — untouched.
+
+### Honest notes
+- **No `CI=true yarn build`** here (no Node) — static-checked (no unused imports; JobDetail JSX balances). Needs the owner build + deploy, then a quick QA: open a job with many candidates → scroll → tabs/filters/analyse/bulk stay pinned below the header, upload zone scrolls away; same for the Jobs and admin list filter bars.
 
 ---
 

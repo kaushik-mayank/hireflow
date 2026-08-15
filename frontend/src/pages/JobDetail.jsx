@@ -235,24 +235,10 @@ export default function JobDetail() {
             This job is closed. You can view its candidates and data, but you can't add candidates, run analysis, or change stages.
           </div>
         )}
-        {/* Upload zone */}
+        {/* Upload zone — scrolls away naturally; the analyse action now lives with
+            the filters below so it stays reachable while working a long list. */}
         <Card className="p-5 mb-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-gray-800">Upload Resumes</h3>
-            <AIButton
-              loading={analyzing}
-              onClick={analyzeCandidates}
-              disabled={!canUseAI}
-              title={canUseAI ? undefined : NO_PERM}
-              data-testid="analyze-all-btn"
-            >
-              {analyzing
-                ? "Analyzing..."
-                : selected.length
-                  ? `Analyse Selected Candidates (${selected.length})`
-                  : "Analyze All Candidates"}
-            </AIButton>
-          </div>
+          <h3 className="font-semibold text-gray-800 mb-3">Upload Resumes</h3>
 
           {/* Mandatory: chosen before upload and applied to every file in the
               batch, so Reports/analytics group candidates by a real source. */}
@@ -301,18 +287,20 @@ export default function JobDetail() {
           </div>
         </Card>
 
-        {/* Tabs */}
-        <div className="flex gap-1 border-b border-gray-200 mb-4">
-          {tabs.map(([k, label]) => (
-            <button key={k} onClick={() => setTab(k)} className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === k ? "border-indigo text-indigo" : "border-transparent text-gray-600 hover:text-gray-800"}`} data-testid={`tab-${k}`}>
-              {label} {k === "candidates" && <span className="text-xs text-gray-400">({cands.length})</span>}
-            </button>
-          ))}
-        </div>
+        {/* Sticky controls — tabs, candidate filters, the analyse action and the
+            bulk bar stay pinned below the Topbar while a long candidate list
+            scrolls beneath them. */}
+        <div className="sticky z-10 bg-gray-50 pb-3" style={{ top: "var(--topbar-h, 0px)" }} data-testid="job-sticky-controls">
+          <div className="flex gap-1 border-b border-gray-200">
+            {tabs.map(([k, label]) => (
+              <button key={k} onClick={() => setTab(k)} className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === k ? "border-indigo text-indigo" : "border-transparent text-gray-600 hover:text-gray-800"}`} data-testid={`tab-${k}`}>
+                {label} {k === "candidates" && <span className="text-xs text-gray-400">({cands.length})</span>}
+              </button>
+            ))}
+          </div>
 
-        {tab === "candidates" && (
-          <>
-            <div className="flex flex-wrap items-center gap-3 mb-4">
+          {tab === "candidates" && (
+            <div className="flex flex-wrap items-center gap-3 pt-4">
               <div className="relative flex-1 min-w-[180px] max-w-xs">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name..." className="w-full rounded-lg border border-gray-200 pl-9 pr-3 py-2 text-sm bg-white outline-none focus:border-indigo" data-testid="cand-search" />
@@ -339,10 +327,24 @@ export default function JobDetail() {
                 <option value="name">Sort: Name</option>
                 <option value="date">Sort: Date</option>
               </select>
+              <AIButton
+                loading={analyzing}
+                onClick={analyzeCandidates}
+                disabled={!canUseAI}
+                title={canUseAI ? undefined : NO_PERM}
+                data-testid="analyze-all-btn"
+              >
+                {analyzing
+                  ? "Analyzing..."
+                  : selected.length
+                    ? `Analyse Selected Candidates (${selected.length})`
+                    : "Analyze All Candidates"}
+              </AIButton>
             </div>
+          )}
 
-            {selected.length > 0 && (
-              <div className="flex items-center gap-3 mb-3 bg-indigo-light/50 rounded-lg px-4 py-2.5" data-testid="bulk-bar">
+          {tab === "candidates" && selected.length > 0 && (
+            <div className="flex items-center gap-3 mt-3 bg-indigo-light/50 rounded-lg px-4 py-2.5" data-testid="bulk-bar">
                 <CheckSquare size={16} className="text-indigo" />
                 <span className="text-sm text-gray-700 font-medium">{selected.length} selected</span>
                 <select
@@ -358,10 +360,11 @@ export default function JobDetail() {
                 </select>
                 <button onClick={() => setSelected([])} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>
               </div>
-            )}
+          )}
+        </div>
 
-            {view.length ? (
-              <div className="space-y-2">
+        {tab === "candidates" && (view.length ? (
+          <div className="space-y-2">
                 {view.map((c) => (
                   <Card key={c.id} className="p-3.5 flex items-center gap-3 hover:shadow-card transition-shadow" data-testid={`cand-row-${c.id}`}>
                     <input type="checkbox" checked={selected.includes(c.id)} onChange={() => toggleSel(c.id)} className="accent-indigo w-4 h-4" data-testid={`cand-check-${c.id}`} />
@@ -395,11 +398,9 @@ export default function JobDetail() {
                   </Card>
                 ))}
               </div>
-            ) : (
-              <Card><EmptyState icon={Upload} title="No candidates yet" subtitle="Upload PDF resumes above to get started, then run AI analysis." /></Card>
-            )}
-          </>
-        )}
+        ) : (
+          <Card><EmptyState icon={Upload} title="No candidates yet" subtitle="Upload PDF resumes above to get started, then run AI analysis." /></Card>
+        ))}
 
         {tab === "jd" && (
           <Card className="p-6">

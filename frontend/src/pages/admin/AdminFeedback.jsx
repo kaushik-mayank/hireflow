@@ -73,7 +73,8 @@ export default function AdminFeedback() {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-3 mb-4">
+        {/* Filters + pagination stay pinned below the Topbar while the list scrolls. */}
+        <div className="sticky z-10 bg-gray-50 py-3 mb-2 flex flex-wrap items-center gap-3" style={{ top: "var(--topbar-h, 0px)" }}>
           <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className={select} data-testid="feedback-status-filter">
             <option value="">All statuses</option>
             <option value="new">New</option>

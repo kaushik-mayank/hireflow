@@ -44,7 +44,8 @@ export default function AdminResumes() {
     <Layout>
       <Topbar title="Uploaded Resumes" subtitle={data ? `${data.total} resumes across all HR users` : "Loading..."} />
       <PageBody fullWidth>
-        <div className="flex items-center justify-between mb-4">
+        {/* Search + pagination stay pinned below the Topbar while the list scrolls. */}
+        <div className="sticky z-10 bg-gray-50 py-3 mb-2 flex items-center justify-between" style={{ top: "var(--topbar-h, 0px)" }}>
           <div className="relative w-72">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search candidate or file..." className="w-full rounded-lg border border-gray-200 pl-9 pr-3 py-2 text-sm bg-white outline-none focus:border-indigo" data-testid="resumes-search" />

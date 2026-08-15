@@ -48,7 +48,8 @@ export default function AdminUsers() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 mb-4">
+        {/* Filters stay pinned below the Topbar while the user list scrolls. */}
+        <div className="sticky z-10 bg-gray-50 py-3 mb-2 flex flex-wrap items-center gap-3" style={{ top: "var(--topbar-h, 0px)" }}>
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, company..." className="w-full rounded-lg border border-gray-200 pl-9 pr-3 py-2 text-sm bg-white outline-none focus:border-indigo" data-testid="users-search" />

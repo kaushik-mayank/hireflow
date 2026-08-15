@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { LayoutDashboard, Briefcase, BarChart3, Users, FileText, Activity, DollarSign, LogOut, Hexagon, Shield, MessageSquare } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -109,8 +110,22 @@ export function Sidebar() {
 }
 
 export function Topbar({ title, subtitle, actions }) {
+  // Publish the sticky Topbar's height as a CSS variable so page-level sticky
+  // sub-headers (filter/tab bars, table headers) can pin directly below it with
+  // `top: var(--topbar-h)` — robust across pages, no magic pixel numbers.
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const apply = () => document.documentElement.style.setProperty("--topbar-h", `${el.offsetHeight}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="sticky top-0 z-20 bg-white border-b border-gray-200">
+    <div ref={ref} className="sticky top-0 z-20 bg-white border-b border-gray-200">
       <div className="flex items-center justify-between px-9 py-4">
         <div>
           <h1 className="text-xl font-semibold text-gray-800">{title}</h1>
