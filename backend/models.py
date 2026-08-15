@@ -65,6 +65,27 @@ class MemberRemove(BaseModel):
     reassign_to: Optional[str] = None
 
 
+class SubAdminPermissions(BaseModel):
+    """Set a member's granted org-admin capabilities (Sub-Admin). An empty list
+    demotes them back to a normal recruiter. Only an Admin (manager) may call
+    this; unknown capabilities are ignored server-side."""
+    admin_permissions: List[str] = []
+
+
+# ---------- Resume DB (Cycle 5) ----------
+class ResumeShareUpdate(BaseModel):
+    """Toggle a Resume DB record between org-shared and private. Persisted and
+    reversible; org-scoped authorization is enforced server-side."""
+    shared: bool
+
+
+class ResumeMoveToJob(BaseModel):
+    """Move an existing Resume DB record onto a job as a candidate. Reuses the
+    stored file and parsed data — no re-upload, no re-parse. Source is recorded
+    as 'Internal Database'."""
+    job_id: str
+
+
 class AssignmentUpsert(BaseModel):
     """A manager assigns a job to a recruiter with per-assignment permissions,
     targets and a deadline. Idempotent on (job, user): sending it again edits the

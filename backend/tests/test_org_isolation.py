@@ -156,6 +156,9 @@ def world():
         "stage_transitions": FakeColl(),
         "activity_events": FakeColl(),
         "ai_usage_log": FakeColl(),
+        # Cycle 5: routes_candidates (and resume_store) now import resume_db, so
+        # the database stub must provide it or the import fails in reverse order.
+        "resume_db": FakeColl(),
     }
     _merge_stub("database", UPLOAD_DIR=Path("."), **colls)
     _merge_stub("auth", get_current_user=lambda: None)

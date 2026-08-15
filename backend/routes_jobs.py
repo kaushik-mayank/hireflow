@@ -111,7 +111,9 @@ async def create_job(body: JobCreate, user: dict = Depends(permissions.require_o
         raise HTTPException(status_code=400, detail="Openings must be at least 1")
 
     now = datetime.now(timezone.utc).isoformat()
-    origin = "org" if permissions.is_manager(user) else "personal"
+    # A manager, or a sub-admin granted `post_jobs`, creates an org job; any other
+    # recruiter creates a personal job (visible only to them).
+    origin = "org" if permissions.has_capability(user, "post_jobs") else "personal"
     job = {
         "id": str(uuid.uuid4()),
         "org_id": user["org_id"],
@@ -209,9 +211,18 @@ async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_curr
 
 @router.delete("/{job_id}")
 async def delete_job(job_id: str, user: dict = Depends(get_current_user)):
-    access = await permissions.resolve_job_access(user, job_id)
-    if access.scope not in ("manager", "owner"):
-        raise HTTPException(status_code=403, detail="Only an admin can delete this job.")
+    # A manager, or a sub-admin granted `delete_jobs`, may delete any ORG job;
+    # a recruiter may delete only their own personal job.
+    if permissions.has_capability(user, "delete_jobs"):
+        job = await jobs.find_one({"id": job_id, "org_id": user["org_id"], "origin": {"$ne": "personal"}}, {"_id": 0})
+        if job is None:
+            access = await permissions.resolve_job_access(user, job_id)  # own personal job path
+            if access.scope not in ("manager", "owner"):
+                raise HTTPException(status_code=403, detail="Only an admin can delete this job.")
+    else:
+        access = await permissions.resolve_job_access(user, job_id)
+        if access.scope not in ("manager", "owner"):
+            raise HTTPException(status_code=403, detail="Only an admin can delete this job.")
     cand_ids = [c["id"] async for c in candidates.find({"job_id": job_id}, {"id": 1})]
     if cand_ids:
         await stage_transitions.delete_many({"candidate_id": {"$in": cand_ids}})

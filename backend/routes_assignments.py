@@ -108,7 +108,7 @@ async def _write_assignment(org_id, job_id, actor_id, user_id, perms, targets, d
 
 
 @router.post("/{job_id}/assignments")
-async def upsert_assignment(job_id: str, body: AssignmentUpsert, user: dict = Depends(permissions.require_manager)):
+async def upsert_assignment(job_id: str, body: AssignmentUpsert, user: dict = Depends(permissions.require_capability("assign_jobs"))):
     """Assign a job to a recruiter, or edit the existing assignment. Idempotent
     on (job, user) — sending it twice updates rather than duplicates."""
     org_id = user["org_id"]
@@ -124,7 +124,7 @@ async def upsert_assignment(job_id: str, body: AssignmentUpsert, user: dict = De
 
 
 @router.post("/{job_id}/assignments/bulk")
-async def bulk_upsert_assignments(job_id: str, body: BulkAssignmentUpsert, user: dict = Depends(permissions.require_manager)):
+async def bulk_upsert_assignments(job_id: str, body: BulkAssignmentUpsert, user: dict = Depends(permissions.require_capability("assign_jobs"))):
     """Assign one job to several recruiters with the same settings. Invalid or
     ineligible ids are skipped-with-reason rather than failing the whole batch."""
     org_id = user["org_id"]
@@ -149,7 +149,7 @@ async def bulk_upsert_assignments(job_id: str, body: BulkAssignmentUpsert, user:
 
 
 @router.get("/{job_id}/assignments")
-async def list_assignments(job_id: str, user: dict = Depends(permissions.require_manager)):
+async def list_assignments(job_id: str, user: dict = Depends(permissions.require_capability("assign_jobs"))):
     org_id = user["org_id"]
     await _manager_job_or_404(job_id, org_id)
     rows = await job_assignments.find(
@@ -163,7 +163,7 @@ async def list_assignments(job_id: str, user: dict = Depends(permissions.require
 
 
 @router.delete("/{job_id}/assignments/{member_id}")
-async def revoke_assignment(job_id: str, member_id: str, user: dict = Depends(permissions.require_manager)):
+async def revoke_assignment(job_id: str, member_id: str, user: dict = Depends(permissions.require_capability("assign_jobs"))):
     org_id = user["org_id"]
     await _manager_job_or_404(job_id, org_id)
     assignment = await job_assignments.find_one(

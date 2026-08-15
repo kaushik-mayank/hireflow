@@ -605,7 +605,7 @@ async def _team_report_data(org_id: str, now: datetime, range_days: Optional[int
 
 
 @router.get("/team")
-async def team_report(range_days: Optional[int] = Query(None), user: dict = Depends(permissions.require_manager)) -> dict:
+async def team_report(range_days: Optional[int] = Query(None), user: dict = Depends(permissions.require_capability("view_reports"))) -> dict:
     return await _team_report_data(user["org_id"], datetime.now(timezone.utc), range_days)
 
 
@@ -624,7 +624,7 @@ _CSV_PANELS = {
 async def team_report_csv(
     panel: str = Query("throughput"),
     range_days: Optional[int] = Query(None),
-    user: dict = Depends(permissions.require_manager),
+    user: dict = Depends(permissions.require_capability("view_reports")),
 ):
     if panel not in _CSV_PANELS:
         raise HTTPException(status_code=400, detail=f"Unknown panel. Choose one of: {', '.join(_CSV_PANELS)}")

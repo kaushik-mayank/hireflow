@@ -17,6 +17,7 @@ import routes_orgs
 import routes_assignments
 import routes_jobs
 import routes_candidates
+import routes_resume_db
 import routes_ai
 import routes_dashboard
 import routes_admin
@@ -138,6 +139,7 @@ api_router.include_router(routes_assignments.router)
 api_router.include_router(routes_assignments.mine_router)
 api_router.include_router(routes_jobs.router)
 api_router.include_router(routes_candidates.router)
+api_router.include_router(routes_resume_db.router)
 api_router.include_router(routes_ai.router)
 api_router.include_router(routes_dashboard.router)
 api_router.include_router(routes_admin.router)

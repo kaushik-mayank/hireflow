@@ -92,6 +92,12 @@ export default function JobDetail() {
     try {
       const r = await candidatesApi.upload(id, fd);
       toast.success(`${r.data.count} resume(s) uploaded`);
+      // Surface per-file extraction problems (encrypted/corrupt/empty Word etc.)
+      // so a document upload is never silently blank — the candidate is still
+      // created and can be edited by hand.
+      (r.data.warnings || []).forEach((w) =>
+        toast.warning(`${w.filename}: ${w.warning}`, { duration: 8000 })
+      );
       loadCands();
       jobsApi.get(id).then((j) => setJob(j.data));
     } catch (err) {

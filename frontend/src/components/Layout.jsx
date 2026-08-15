@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Briefcase, BarChart3, Users, FileText, Activity, DollarSign, LogOut, Hexagon, Shield, MessageSquare } from "lucide-react";
+import { LayoutDashboard, Briefcase, BarChart3, Users, FileText, Activity, DollarSign, LogOut, Hexagon, Shield, MessageSquare, Database } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Avatar } from "@/components/ui";
 
@@ -16,8 +16,11 @@ export function Sidebar() {
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   // Org manager ("Admin" in the UI). Legacy accounts have no org_role and are
-  // treated as managers of their own org. Recruiters ("User") don't see Team.
+  // treated as managers of their own org.
   const isManager = (user?.org_role || "manager") === "manager";
+  // The Team page is reachable by a manager or a Sub-Admin granted manage_team
+  // (Cycle 5). A manager implicitly holds every capability. Plain Users don't see it.
+  const canManageTeam = isManager || (user?.admin_permissions || []).includes("manage_team");
 
   const handleLogout = () => {
     logout();
@@ -54,7 +57,10 @@ export function Sidebar() {
         <NavLink to="/reports" className={navItem} data-testid="nav-reports">
           <BarChart3 size={17} /> Reports
         </NavLink>
-        {isManager && (
+        <NavLink to="/resume-db" className={navItem} data-testid="nav-resume-db">
+          <Database size={17} /> Resume DB
+        </NavLink>
+        {canManageTeam && (
           <NavLink to="/team" className={navItem} data-testid="nav-team">
             <Users size={17} /> Team
           </NavLink>

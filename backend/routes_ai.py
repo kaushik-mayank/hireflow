@@ -9,63 +9,7 @@ from models import (
 )
 import ai_service as ai
 import permissions
-
-
-def _as_list(value) -> list:
-    if isinstance(value, list):
-        return [v for v in value if v not in (None, "")]
-    return []
-
-
-def _normalize_structure(parsed: dict, cand: dict) -> dict:
-    """Coerce the model's JSON into a stable shape the viewer can rely on, and
-    backfill contact + links from what the parser already extracted."""
-    parsed = parsed if isinstance(parsed, dict) else {}
-    contact = parsed.get("contact") if isinstance(parsed.get("contact"), dict) else {}
-
-    experience = []
-    for e in _as_list(parsed.get("experience")):
-        if isinstance(e, dict):
-            experience.append({
-                "title": str(e.get("title") or ""),
-                "organization": str(e.get("organization") or ""),
-                "dates": str(e.get("dates") or ""),
-                "location": str(e.get("location") or ""),
-                "highlights": [str(h) for h in _as_list(e.get("highlights"))],
-            })
-
-    education = []
-    for e in _as_list(parsed.get("education")):
-        if isinstance(e, dict):
-            education.append({
-                "qualification": str(e.get("qualification") or ""),
-                "institution": str(e.get("institution") or ""),
-                "dates": str(e.get("dates") or ""),
-            })
-
-    return {
-        "name": str(parsed.get("name") or cand.get("name") or ""),
-        "headline": str(parsed.get("headline") or ""),
-        "contact": {
-            # Prefer the reliably-parsed values (from the PDF mailto:/text
-            # extraction at upload) over the AI's reading of the mangled resume
-            # text, which is where the wrong email in the formatted view came from.
-            "email": str(cand.get("email") or contact.get("email") or ""),
-            "phone": str(cand.get("phone") or contact.get("phone") or ""),
-            "location": str(contact.get("location") or ""),
-        },
-        "links": {
-            "linkedin": cand.get("linkedin") or "",
-            "github": cand.get("github") or "",
-            "portfolio": cand.get("portfolio") or "",
-        },
-        "summary": str(parsed.get("summary") or ""),
-        "skills": [str(s) for s in _as_list(parsed.get("skills"))],
-        "experience": experience,
-        "education": education,
-        "certifications": [str(c) for c in _as_list(parsed.get("certifications"))],
-        "languages": [str(le) for le in _as_list(parsed.get("languages"))],
-    }
+from resume_structure import as_list as _as_list, normalize_structure as _normalize_structure
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 

@@ -57,6 +57,11 @@ export const orgsApi = {
   setMemberStatus: (id, status) => client.patch(`/orgs/members/${id}`, { status }),
   // reassign_to: another recruiter's id (or null to leave work unassigned).
   removeMember: (id, reassign_to = null) => client.delete(`/orgs/members/${id}`, { data: { reassign_to } }),
+  // Sub-Admins (Cycle 5) — manager-only. The catalogue of grantable capabilities,
+  // and setting a member's granted capabilities (empty list demotes to a User).
+  capabilities: () => client.get("/orgs/capabilities"),
+  setMemberPermissions: (id, admin_permissions) =>
+    client.put(`/orgs/members/${id}/permissions`, { admin_permissions }),
 };
 
 // ---- Assignments & personal JD override (Cycle 2) ----
@@ -95,6 +100,26 @@ export const candidatesApi = {
   remove: (id) => client.delete(`/candidates/${id}`),
   // Direct PDF download of the candidate's resume (blob, via the auth interceptor).
   resumePdf: (id) => client.get(`/candidates/${id}/resume.pdf`, { responseType: "blob" }),
+};
+
+// ---- Resume DB (Cycle 5) ----
+// The organisation's persistent internal resume repository. Filtering/search run
+// server-side (never the whole DB in the browser). Structured JSON + PDF reuse
+// the same viewer/PDF machinery as candidates.
+export const resumeDbApi = {
+  // filters: { q, skills, source, min_experience, uploaded_from, uploaded_to, shared, limit, offset }
+  list: (filters = {}) => {
+    const params = Object.fromEntries(
+      Object.entries(filters).filter(([, v]) => v !== undefined && v !== null && v !== "")
+    );
+    return client.get("/resume-db", { params });
+  },
+  get: (id) => client.get(`/resume-db/${id}`),
+  structure: (id) => client.post(`/resume-db/${id}/structure`),
+  resumePdf: (id) => client.get(`/resume-db/${id}/resume.pdf`, { responseType: "blob" }),
+  setShared: (id, shared) => client.patch(`/resume-db/${id}/share`, { shared }),
+  moveToJob: (id, job_id) => client.post(`/resume-db/${id}/move-to-job`, { job_id }),
+  remove: (id) => client.delete(`/resume-db/${id}`),
 };
 
 // ---- AI ----

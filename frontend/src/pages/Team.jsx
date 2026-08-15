@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { UserPlus, Users, ShieldOff, ShieldCheck, Trash2, Info, AlertCircle } from "lucide-react";
+import { UserPlus, Users, ShieldOff, ShieldCheck, Trash2, Info, AlertCircle, KeyRound } from "lucide-react";
 import { orgsApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Avatar, Button, Modal, Skeleton, EmptyState, Pill } from "@/components/ui";
@@ -155,6 +155,90 @@ function AddUserModal({ open, onClose, onDone }) {
   );
 }
 
+// Sub-Admin permissions (Cycle 5). Manager-only: grant a User a subset of the
+// admin capabilities (which map to real existing admin functionality), edit them
+// later, or clear them all to demote back to a plain User. A Sub-Admin can never
+// reach this screen — the whole Team page is manager-only.
+function PermissionsModal({ target, onClose, onDone }) {
+  const [catalogue, setCatalogue] = useState([]);
+  const [selected, setSelected] = useState(new Set(target?.admin_permissions || []));
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    orgsApi.capabilities()
+      .then((r) => setCatalogue(r.data || []))
+      .catch(() => toast.error("Couldn't load capabilities."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const toggle = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const caps = Array.from(selected);
+      await orgsApi.setMemberPermissions(target.id, caps);
+      toast.success(caps.length
+        ? `${target.name || target.email} is now a Sub-Admin`
+        : `${target.name || target.email} is back to a standard User`);
+      onDone();
+      onClose();
+    } catch (err) {
+      toast.error(apiErr(err, "Couldn't update permissions."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open onClose={onClose} width="max-w-lg" title={`Permissions · ${target.name || target.email}`}
+      footer={<>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={save} disabled={saving || loading} data-testid="perms-save">
+          {saving ? "Saving…" : "Save permissions"}
+        </Button>
+      </>}
+    >
+      <p className="text-xs text-gray-500 leading-relaxed mb-4">
+        Grant this User specific admin abilities to make them a <span className="font-medium">Sub-Admin</span>.
+        They'll be able to do only what you tick here, and can never change permissions or promote anyone else.
+        Untick everything to return them to a standard User.
+      </p>
+      {loading ? (
+        <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-11" />)}</div>
+      ) : (
+        <div className="space-y-2">
+          {catalogue.map((cap) => {
+            const on = selected.has(cap.id);
+            return (
+              <button
+                key={cap.id} onClick={() => toggle(cap.id)}
+                className={`w-full flex items-center gap-3 rounded-lg border px-3.5 py-2.5 text-left transition-colors ${
+                  on ? "border-indigo bg-indigo-light/50" : "border-gray-200 hover:bg-gray-50"
+                }`}
+                data-testid={`perm-${cap.id}`}
+              >
+                <span className={`grid place-items-center w-4 h-4 rounded border ${on ? "bg-indigo border-indigo" : "border-gray-300"}`}>
+                  {on && <ShieldCheck size={11} className="text-white" />}
+                </span>
+                <span className="text-sm font-medium text-gray-800">{cap.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function RemoveModal({ target, recruiters, onClose, onDone }) {
   const [reassignTo, setReassignTo] = useState("");
   const [saving, setSaving] = useState(false);
@@ -198,12 +282,18 @@ function RemoveModal({ target, recruiters, onClose, onDone }) {
 
 export default function Team() {
   const { user } = useAuth();
+  // Promotion is manager-only; a Sub-Admin (manage_team) reaches this page but can
+  // only manage plain Users — mirrors the server-side rules so the UI never offers
+  // an action the backend will reject.
+  const isManager = (user?.org_role || "manager") === "manager";
+  const canManage = (m) => isManager || (m.org_role === "recruiter" && !m.is_subadmin);
   const [org, setOrg] = useState(null);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [removeTarget, setRemoveTarget] = useState(null);
+  const [permsTarget, setPermsTarget] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -244,11 +334,25 @@ export default function Team() {
     </Button>
   );
 
+  // Only a User (recruiter) can be made a Sub-Admin; managers already have
+  // everything, and a never-signed-in approval has no account to grant yet.
+  // Promotion is manager-only — a Sub-Admin can never grant capabilities.
+  const permsBtn = (m) =>
+    isManager && m.org_role === "recruiter" && (m.status === "active" || m.status === "disabled") ? (
+      <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => setPermsTarget(m)} title="Permissions" data-testid={`perms-${m.id}`}>
+        <KeyRound size={15} className={m.is_subadmin ? "text-indigo" : "text-gray-400"} />
+      </Button>
+    ) : null;
+
   const rowActions = (m) => {
     if (m.id === user?.id) return <span className="text-xs text-gray-400">You</span>;
+    // A Sub-Admin viewer may act only on plain Users — never on a manager or
+    // another admin (the server enforces this too).
+    if (!canManage(m)) return <span className="text-xs text-gray-300">—</span>;
     if (m.status === "active") {
       return (
         <div className="flex items-center gap-1">
+          {permsBtn(m)}
           <Button variant="ghost" className="!px-2 !py-1.5" onClick={() => setStatus(m, "disabled")} title="Suspend" data-testid={`suspend-${m.id}`}>
             <ShieldOff size={15} className="text-coral" />
           </Button>
@@ -259,6 +363,7 @@ export default function Team() {
     if (m.status === "disabled") {
       return (
         <div className="flex items-center gap-1">
+          {permsBtn(m)}
           <Button variant="secondary" className="!px-2 !py-1.5" onClick={() => setStatus(m, "active")} title="Reactivate" data-testid={`reactivate-${m.id}`}>
             <ShieldCheck size={15} className="text-green" />
           </Button>
@@ -342,9 +447,18 @@ export default function Team() {
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`text-xs font-medium rounded-full px-2 py-0.5 ${m.org_role === "manager" ? "bg-indigo-light text-indigo" : "bg-gray-100 text-gray-600"}`}>
-                              {ROLE_LABEL[m.org_role] || "User"}
-                            </span>
+                            {m.is_subadmin ? (
+                              <span
+                                className="text-xs font-medium rounded-full px-2 py-0.5 bg-purple/15 text-purple inline-flex items-center gap-1"
+                                title={`Sub-Admin · ${m.admin_permissions?.length || 0} ${(m.admin_permissions?.length || 0) === 1 ? "capability" : "capabilities"}`}
+                              >
+                                <KeyRound size={11} /> Sub-Admin
+                              </span>
+                            ) : (
+                              <span className={`text-xs font-medium rounded-full px-2 py-0.5 ${m.org_role === "manager" ? "bg-indigo-light text-indigo" : "bg-gray-100 text-gray-600"}`}>
+                                {ROLE_LABEL[m.org_role] || "User"}
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3"><Pill tone={st.tone}>{st.label}</Pill></td>
                           <td className="px-4 py-3 text-gray-700">{m.jobs_assigned}</td>
@@ -375,6 +489,13 @@ export default function Team() {
           target={removeTarget}
           recruiters={members.filter((m) => m.org_role === "recruiter")}
           onClose={() => setRemoveTarget(null)}
+          onDone={load}
+        />
+      )}
+      {permsTarget && (
+        <PermissionsModal
+          target={permsTarget}
+          onClose={() => setPermsTarget(null)}
           onDone={load}
         />
       )}

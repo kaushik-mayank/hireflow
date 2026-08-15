@@ -28,6 +28,9 @@ invitations = db.invitations
 job_assignments = db.job_assignments
 job_jd_overrides = db.job_jd_overrides
 activity_events = db.activity_events
+# Cycle 5 — persistent internal resume repository ("Resume DB"). One record per
+# (org, candidate email); reused across jobs, with per-record sharing visibility.
+resume_db = db.resume_db
 
 # Upload directory
 UPLOAD_DIR = ROOT_DIR / "data" / "uploads"
@@ -100,3 +103,10 @@ async def ensure_indexes() -> None:
 
     await activity_events.create_index([("org_id", 1), ("created_at", -1)])
     await activity_events.create_index([("actor_id", 1), ("created_at", -1)])
+
+    # Resume DB: one row per (org, candidate_uid). Uploader + shared drive
+    # visibility; uploaded_at drives the freshness (newest-wins) rule.
+    await resume_db.create_index([("org_id", 1), ("candidate_uid", 1)], unique=True)
+    await resume_db.create_index([("org_id", 1), ("uploader_id", 1)])
+    await resume_db.create_index([("org_id", 1), ("shared", 1), ("uploaded_at", -1)])
+    await resume_db.create_index("id")

@@ -4,8 +4,58 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🟢 **Cycle 4 — sticky controls / large-list UX polish (frontend-only). Owner env steps still pending: `CI=true yarn build`, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Current phase:** 🟢 **Cycle 5 — Sub-Admins, Resume DB, expanded resume parsing (PDF/DOC/DOCX). Backend done + 369 offline tests green (fwd+rev). Owner env steps still pending: `CI=true yarn build` for the new/edited frontend, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
 **Last updated:** 2026-08-15
+
+---
+
+## Session 36 — 2026-08-15 — Cycle 5: Sub-Admins + Resume DB + expanded resume parsing
+
+Large three-feature cycle. **Backend fully implemented and tested** (369 offline tests green forward *and* reverse — 52 new). **Frontend written to existing patterns but unbuilt** (no Node locally; needs the owner's `CI=true yarn build`).
+
+### 1. Resume parsing — expanded format support (`backend/resume_parser.py`)
+- Added `class ExtractionError` and made failures **loud, never silently empty** (the core requirement). `_extract_pdf` now raises on an unopenable/corrupt PDF and detects **password-protected** PDFs (`is_encrypted` + failed empty-password `decrypt`).
+- **Legacy `.doc`** (Word 97-2003) had no lightweight reader → silently blank before. Added `_extract_doc_binary`: decodes UTF-16LE/CP-1252/latin-1 runs from the binary and keeps word-like lines. `.doc` path tries python-docx first (some `.doc` are mislabelled `.docx`), then the binary fallback. `.docx` continues via python-docx unchanged; **PDF/TXT/image behaviour preserved.**
+- `extract_document` now returns `warning` (human message when a text-bearing file yields nothing / is encrypted / corrupt) and `has_text`. `SUPPORTED_EXTENSIONS` already included `.doc/.docx`; the gap was extraction + feedback, now closed.
+- Upload endpoint returns per-file `warnings`; **`JobDetail.jsx`** surfaces them as `toast.warning` (candidate is still created and editable).
+
+### 2. Sub-Admins (capability-based partial admin)
+- **Centralised in `permissions.py`** (no scattered role checks): `ADMIN_CAPABILITIES = post_jobs / delete_jobs / manage_team / assign_jobs / view_reports` (each maps to real existing manager functionality), `sanitize_capabilities`, `has_capability` (a manager implicitly has all; a Sub-Admin has exactly its `admin_permissions`; a plain User none), `is_subadmin`, and a `require_capability(cap)` dependency factory (403 for the ungranted — **server-side, not just hidden**).
+- **Wired the capability into the endpoints** it maps to (replacing `Depends(require_manager)`): `routes_jobs.create_job` origin + `delete_job` (`post_jobs`/`delete_jobs`), `routes_orgs` member ops (`manage_team`), `routes_assignments` (`assign_jobs`), `routes_reports` team report + CSV (`view_reports`).
+- **Promotion is manager-only, by design:** new `PUT /orgs/members/{id}/permissions` (and `GET /orgs/capabilities`) go through `require_manager`, so a Sub-Admin can **never** grant/modify/revoke capabilities — not even its own. Empty list = demote to User. Rejects self and manager targets.
+- **No privilege escalation:** guard `_actor_may_manage` in `update_member`/`remove_member` blocks a `manage_team` Sub-Admin from suspending/removing a manager or another admin (only plain Users). Last-active-admin guard preserved.
+- `admin_permissions`/`is_subadmin` exposed in `routes_auth._public_user` and `routes_orgs` member view so the UI reflects real permissions.
+- **Frontend:** `Team.jsx` gains a manager-only Permissions modal (capability checkboxes from `GET /orgs/capabilities`), a "Sub-Admin" role pill, and Sub-Admin viewers can only act on plain Users; the Team page + sidebar link are reachable by `manage_team` Sub-Admins via a new `CapabilityRoute`.
+
+### 3. Resume DB (persistent internal repository)
+- **New collection `resume_db`** (indexes in `database.py`): one record per **(org, candidate_uid)** where `candidate_uid = sha256(normalised email)`; missing email → per-file `anon:` id (never merges strangers).
+- **`resume_store.py`**: `build_record`, `upsert_fresh` (**newest-by-`uploaded_at` wins**; replaces the older record **in place / same id** so job references survive; keeps the existing sharing choice; unique-index race falls back to update), `visibility_filter`, plus `derive_experience_years` (conservative — `None` rather than a fabricated number) and `extract_skills` for filtering.
+- **No double upload / no duplicate file:** `upload_resumes` additionally upserts a Resume DB record **referencing the candidate's very same stored file**, as part of the existing lifecycle (wrapped so a Resume DB hiccup can't fail the real upload). Stores the *parsed resume*, not the job-specific analysis.
+- **`routes_resume_db.py`** (`/resume-db`), all org-scoped + authorised:
+  - **List/filter/search server-side** (`visibility_filter` + skills/experience/source/date/`q` combined with `$and`; paged) — the whole DB is never shipped to the browser.
+  - **View / structured JSON / PDF reuse the candidate machinery** (`resume_structure.normalize_structure`, `ai_service` structure prompt, `resume_pdf.build_resume_pdf`) — same schema + visual language; structuring backfills `skills`/`experience_years`.
+  - **Sharing** (`PATCH /share`): dynamic Shared/Private, persisted + reversible, owner-or-manager only; **private records are invisible to other users and across orgs (404)**.
+  - **Move to job** (`POST /move-to-job`): reuses the stored file + parsed data, source **"Internal Database"**, records `resume_db_id` provenance, blocks duplicate-on-same-job.
+  - **Delete**: owner-or-manager; removes the physical file **only when no candidate/record still references it** (no orphans / broken refs). `delete_candidate` got the same shared-file guard.
+- **Frontend:** new `pages/ResumeDB.jsx` (server-side filter bar, listing with name/email/skills/experience/upload date/source/sharing, formatted-view modal reusing `ResumeView`, PDF download, share toggle, move-to-job, delete) + left-nav "Resume DB" item + route (visible to all org members).
+
+### Tests (offline stub-merge pattern; forward **and** reverse green — 369 total, 52 new)
+- **`tests/test_resume_parser.py`** (+9): `has_text`, empty-file warning, encrypted/corrupt PDF warnings (monkeypatched), legacy-`.doc` UTF-16 recovery, `.doc`→binary fallback, supported extensions.
+- **`tests/test_cycle5.py`** (new, 43): resume_store identity/freshness (newest-wins replace-in-place, older-ignored, missing-email no-collide, visibility, experience/skills derivation); **upload creates candidate + Resume DB record sharing one file**, warnings surfaced, duplicate-email newest-wins; Resume DB routes — list manager-vs-recruiter visibility, skills-ALL / search / min-experience / source filters, private+cross-org 404, share toggle persist+authz, move-to-job (Internal Database source, file reuse, dup-block, cross-org 404), delete file-guard (keep-when-referenced / remove-when-not / authz), structure backfills skills, PDF reuse; **Sub-Admins** — has_capability, require_capability allow/deny, promote/modify/revoke, reject self/manager target, **no self-promotion (require_manager)**, no suspend/remove of manager or another admin, plain Users manageable, manager unaffected, member view exposes sanitised caps.
+- Fixed reverse-order stub gaps in `test_org_isolation.py` (added `resume_db`) and `test_org_and_auth.py` (added `SubAdminPermissions`) — the documented "add missing names when a route gains an import" pattern.
+
+### Architectural decisions
+- **Capabilities over new roles:** a Sub-Admin is a recruiter with an `admin_permissions` list; the manager keeps every capability implicitly. Kept off the job-visibility spine (`resolve_job_access`/`visible_jobs_query`) to avoid over-granting — the four org-scoped endpoints wire cleanly, and `delete_jobs` uses a direct org-scoped fetch in `delete_job`.
+- **Single stored file, reference-counted deletes:** Resume DB records, moved candidates and the original candidate can all point at one file; physical deletion only happens when the last reference goes (guards in both `routes_resume_db.delete_resume` and `candidates.delete_candidate`).
+- **Lazy structuring** (matches the existing candidate "parse on first view" cost model): the Resume DB stores the extracted text at upload and generates the AI structured JSON on demand, backfilling `skills`/`experience_years` for filtering then. Skill/experience filters therefore match structured records; `q` searches raw text meanwhile. No occupation/role is ever hardcoded — structuring is JD-independent.
+
+### Migrations / DB
+- Additive only: new `resume_db` collection + its indexes (created idempotently by `ensure_indexes`). New user field `admin_permissions` (absent = plain User; no migration needed). New candidate fields `resume_structured`/`resume_db_id` on records created via move-to-job. **No existing schema changed; historical job/candidate data untouched.**
+
+### Limitations / owner follow-ups
+- **Frontend not built here** (no Node) — static-checked (brackets balanced, no unused imports). Needs `CI=true yarn build` + deploy, then QA: upload a `.doc`/encrypted PDF → warning toast + candidate still created; Resume DB list/filter/view/download/share/move/delete; promote a User to Sub-Admin with a subset of capabilities and verify the granted-only behaviour and that a Sub-Admin can't reach the promotion controls.
+- **Existing resumes uploaded before this cycle** won't be in `resume_db` (no backfill run); they populate going forward as candidates are re-uploaded. A one-off backfill script could be added if the owner wants history imported.
+- Legacy `.doc` extraction is best-effort text recovery (no lightweight pure-Python `.doc` parser exists); it produces non-empty, editable text rather than perfect layout — DOCX/PDF remain the clean paths.
 
 ---
 

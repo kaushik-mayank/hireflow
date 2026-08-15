@@ -180,7 +180,8 @@ def world():
                 FirebaseAuthError=_FirebaseAuthError)
 
     for mdl in ("SignupRequest", "LoginRequest", "FirebaseAuthRequest", "OnboardingCheck",
-                "MemberCreate", "BulkMemberCreate", "MemberStatusUpdate", "MemberRemove"):
+                "MemberCreate", "BulkMemberCreate", "MemberStatusUpdate", "MemberRemove",
+                "SubAdminPermissions"):  # Cycle 5: routes_orgs imports this
         _merge_stub("models", **{mdl: object})
 
     sys.modules.pop("auth", None)

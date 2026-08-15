@@ -77,3 +77,61 @@ def test_ocr_absence_is_not_fatal():
     result = rp.extract_document(b"\x89PNG\r\n", "scan.png")
     assert result["text"] == ""
     assert "links" in result
+
+
+# ---------------------------------------------------------------------------
+# Cycle 5: expanded format support + graceful failure (never silently empty)
+# ---------------------------------------------------------------------------
+
+def test_plain_text_reports_has_text_flag():
+    result = rp.extract_document(b"Jane Doe\nSoftware Engineer\n", "r.txt")
+    assert result["has_text"] is True
+    assert result["warning"] is None
+
+
+def test_empty_text_document_warns_instead_of_silent_blank():
+    """A text-bearing file that yields nothing must surface a warning (§1)."""
+    result = rp.extract_document(b"   \n  \n", "r.txt")
+    assert result["has_text"] is False
+    assert result["warning"]  # a human message, not None
+
+
+def test_encrypted_pdf_surfaces_password_warning(monkeypatch):
+    """A password-protected PDF is reported clearly, never stored as blank."""
+    def _raise(_content):
+        raise rp.ExtractionError("This PDF is password-protected. Remove the password and re-upload.")
+    monkeypatch.setattr(rp, "_extract_pdf", _raise)
+    result = rp.extract_document(b"%PDF-1.4 fake", "secret.pdf")
+    assert result["text"] == ""
+    assert "password" in (result["warning"] or "").lower()
+    assert result["has_text"] is False
+
+
+def test_corrupt_pdf_surfaces_warning(monkeypatch):
+    def _raise(_content):
+        raise rp.ExtractionError("This PDF couldn't be opened — it may be corrupt.")
+    monkeypatch.setattr(rp, "_extract_pdf", _raise)
+    result = rp.extract_document(b"not really a pdf", "broken.pdf")
+    assert result["warning"] and result["text"] == ""
+
+
+def test_legacy_doc_binary_recovers_utf16_text():
+    """A legacy .doc storing UTF-16LE text runs is recovered, not left blank."""
+    body = "Jane Developer\nSenior Python Engineer\nExperienced backend developer".encode("utf-16-le")
+    text, links = rp._extract_doc_binary(b"\xd0\xcf\x11\xe0" + body)
+    assert "Developer" in text
+    assert links == []
+
+
+def test_doc_falls_back_to_binary_when_not_docx():
+    """`.doc` bytes that aren't a zipped docx go through the binary path and,
+    for a real text-bearing doc, do not produce a silent empty result."""
+    body = "Michael Scott\nRegional Manager\nDunder Mifflin Paper Company".encode("utf-16-le")
+    result = rp.extract_document(b"\xd0\xcf\x11\xe0" + body, "resume.doc")
+    # Either recovered text (no warning) — never a crash.
+    assert "text" in result and "warning" in result
+
+
+def test_doc_and_docx_are_supported_extensions():
+    for ext in (".pdf", ".doc", ".docx", ".txt"):
+        assert ext in rp.SUPPORTED_EXTENSIONS

@@ -37,6 +37,12 @@ IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
 # Per-format extractors — each returns (text, [embedded_link_uris])
 # ---------------------------------------------------------------------------
 
+# Raised when a file is recognised but its text genuinely cannot be extracted
+# (encrypted/corrupt), so the caller can tell the user rather than store a blank.
+class ExtractionError(Exception):
+    pass
+
+
 def _extract_pdf(content: bytes) -> tuple[str, list]:
     text_parts, links = [], []
     try:
@@ -44,7 +50,17 @@ def _extract_pdf(content: bytes) -> tuple[str, list]:
         reader = PdfReader(io.BytesIO(content))
     except Exception as exc:
         logger.warning("Could not open PDF: %s", exc)
-        return "", []
+        raise ExtractionError("This PDF couldn't be opened — it may be corrupt.") from exc
+
+    # Password-protected PDFs: try an empty owner password, else report clearly.
+    if getattr(reader, "is_encrypted", False):
+        try:
+            if reader.decrypt("") == 0:
+                raise ExtractionError("This PDF is password-protected. Remove the password and re-upload.")
+        except ExtractionError:
+            raise
+        except Exception as exc:
+            raise ExtractionError("This PDF is password-protected. Remove the password and re-upload.") from exc
 
     for page in reader.pages:
         try:
@@ -99,6 +115,36 @@ def _extract_docx(content: bytes) -> tuple[str, list]:
         pass
 
     return "\n".join(parts).strip(), links
+
+
+def _extract_doc_binary(content: bytes) -> tuple[str, list]:
+    """Best-effort text from a legacy binary .doc (Word 97-2003).
+
+    There is no lightweight pure-Python reader for the old .doc format, so we
+    pull readable text runs directly from the bytes. A .doc stores its text as
+    either UTF-16LE or CP-1252 runs interleaved with binary structures; we decode
+    both ways and keep whichever yields more real, alphabetic lines. Messy but
+    non-empty — the AI structuring step and the recruiter's edits do the rest,
+    which is far better than silently storing a blank."""
+    def readable(decoded: str) -> str:
+        cleaned = "".join(c if (c.isprintable() or c in "\n\t ") else "\n" for c in decoded)
+        lines = []
+        for ln in cleaned.split("\n"):
+            ln = ln.strip()
+            # Keep lines that look like words, not stray formatting tokens.
+            if len(ln) >= 4 and sum(c.isalpha() for c in ln) >= max(3, len(ln) // 2):
+                lines.append(ln)
+        return "\n".join(lines).strip()
+
+    best = ""
+    for enc in ("utf-16-le", "cp1252", "latin-1"):
+        try:
+            candidate = readable(content.decode(enc, errors="ignore"))
+        except Exception:
+            candidate = ""
+        if len(candidate) > len(best):
+            best = candidate
+    return best, []
 
 
 def _extract_text_file(content: bytes) -> tuple[str, list]:
@@ -198,19 +244,34 @@ def extract_document(content: bytes, filename: str) -> dict:
     and `ocr_used`/`unsupported` flags for the caller to surface if needed.
     """
     ext = os.path.splitext(filename or "")[1].lower()
+    warning = None
 
-    if ext == ".pdf":
-        text, raw_links = _extract_pdf(content)
-    elif ext in (".docx", ".doc"):
-        # python-docx reads .docx; legacy binary .doc is not supported and will
-        # come back empty, which the caller stores as an editable blank.
-        text, raw_links = _extract_docx(content)
-    elif ext == ".txt":
-        text, raw_links = _extract_text_file(content)
-    elif ext in IMAGE_EXTENSIONS:
-        text, raw_links = _extract_image(content)
-    else:
-        text, raw_links = "", []
+    try:
+        if ext == ".pdf":
+            text, raw_links = _extract_pdf(content)
+        elif ext == ".docx":
+            text, raw_links = _extract_docx(content)
+        elif ext == ".doc":
+            # Some .doc files are actually zipped .docx mislabelled — try that
+            # first, then fall back to best-effort binary extraction.
+            text, raw_links = _extract_docx(content)
+            if not text:
+                text, raw_links = _extract_doc_binary(content)
+        elif ext == ".txt":
+            text, raw_links = _extract_text_file(content)
+        elif ext in IMAGE_EXTENSIONS:
+            text, raw_links = _extract_image(content)
+            if not text:
+                warning = "No text could be read from this image. If OCR isn't available, type the details in manually."
+        else:
+            text, raw_links = "", []
+    except ExtractionError as exc:
+        text, raw_links, warning = "", [], str(exc)
+
+    # A text-bearing document that yielded nothing is worth flagging so the user
+    # can re-upload (e.g. a PDF that is just a scanned image, or an odd .doc).
+    if warning is None and ext in (".pdf", ".doc", ".docx", ".txt") and not (text or "").strip():
+        warning = "We couldn't read any text from this file. Try re-uploading it as a PDF."
 
     # Any URLs printed as plain text count too.
     for match in URL_RE.finditer(text or ""):
@@ -229,4 +290,8 @@ def extract_document(content: bytes, filename: str) -> dict:
         "linkedin": classified["linkedin"],
         "github": classified["github"],
         "portfolio": classified["portfolio"],
+        # None when text was extracted; a human message when it wasn't, so the
+        # upload endpoint can tell the user which files need attention.
+        "warning": warning,
+        "has_text": bool((text or "").strip()),
     }

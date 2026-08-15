@@ -51,6 +51,62 @@ def sanitize_permissions(raw) -> dict:
         return {}
     return {flag: bool(raw[flag]) for flag in PERMISSION_FLAGS if flag in raw}
 
+
+# ---------------------------------------------------------------------------
+# Sub-Admin capabilities (Cycle 5)
+#
+# The org "Admin" (manager) can promote a recruiter to a **Sub-Admin** and grant
+# a subset of these org-admin capabilities. Each maps to real existing manager-
+# only functionality. A manager implicitly has all of them; a sub-admin has only
+# the ones stored in their user doc's `admin_permissions`. A normal recruiter has
+# none. Only a manager can grant/modify/revoke them (never a sub-admin), which is
+# enforced where those endpoints live.
+# ---------------------------------------------------------------------------
+ADMIN_CAPABILITIES = (
+    "post_jobs",      # create org jobs (visible to the team), edit them
+    "delete_jobs",    # close / delete org jobs
+    "manage_team",    # approve / suspend / remove teammates
+    "assign_jobs",    # assign jobs to recruiters, set permissions/targets
+    "view_reports",   # the manager team report + CSV export
+)
+_CAP_DENIED = "You don't have permission to do this. Ask your admin."
+
+
+def sanitize_capabilities(raw) -> list:
+    """Keep only known capabilities, de-duplicated and ordered — a client can
+    never invent or smuggle in an unknown capability."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for cap in ADMIN_CAPABILITIES:  # canonical order
+        if cap in raw and cap not in out:
+            out.append(cap)
+    return out
+
+
+def has_capability(user: dict, cap: str) -> bool:
+    """A manager has every capability; a sub-admin has exactly the ones granted."""
+    if is_manager(user):
+        return True
+    return cap in (user.get("admin_permissions") or [])
+
+
+def is_subadmin(user: dict) -> bool:
+    return bool(user) and not is_manager(user) and bool(user.get("admin_permissions"))
+
+
+def require_capability(cap: str):
+    """Dependency factory: allow a manager, or a sub-admin granted `cap`. A normal
+    recruiter (or anyone without the capability) gets a 403 — enforced server-side,
+    never just hidden in the UI."""
+    async def dep(user: dict = Depends(get_current_user)) -> dict:
+        if not user.get("org_id"):
+            raise HTTPException(status_code=403, detail="Your account isn't part of an organisation yet.")
+        if not has_capability(user, cap):
+            raise HTTPException(status_code=403, detail=_CAP_DENIED)
+        return user
+    return dep
+
 # Human sentences for denied permissions (never surface a flag name to a user).
 _DENIED_MESSAGE = {
     "can_edit_jd": "You don't have permission to edit this job description. Ask your admin.",

@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response
 
-from database import jobs, candidates, stage_transitions, activity_events, UPLOAD_DIR
+from database import jobs, candidates, stage_transitions, activity_events, resume_db, UPLOAD_DIR
 from auth import get_current_user
 from models import StageUpdate, NoteUpdate, BulkStageUpdate
 import resume_parser
 import resume_pdf
+import resume_store
 import permissions
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
@@ -69,6 +70,7 @@ async def upload_resumes(
 
     assignment_id = access.assignment["id"] if access.assignment else None
     created = []
+    warnings = []  # per-file, non-fatal extraction notices (e.g. empty/encrypted)
     for f in files:
         ext = os.path.splitext(f.filename or "")[1].lower()
         if ext not in ALLOWED_EXTENSIONS:
@@ -82,6 +84,10 @@ async def upload_resumes(
 
         parsed = resume_parser.extract_document(content, f.filename)
         text = parsed["text"]
+        # Surface a non-fatal extraction problem (encrypted/corrupt/empty Word etc.)
+        # so a document upload never silently produces an empty candidate.
+        if parsed.get("warning"):
+            warnings.append({"filename": f.filename, "warning": parsed["warning"]})
 
         # Keep the original file on disk under a safe stored name (extension preserved).
         stored_name = f"{uuid.uuid4()}{ext}"
@@ -125,8 +131,25 @@ async def upload_resumes(
             "job_id": job_id, "candidate_id": cand_id, "type": "candidate_uploaded",
             "meta": {"source": clean_source}, "created_at": now,
         })
+
+        # Resume DB (Cycle 5): the same upload additionally lands in the org's
+        # internal resume repository — no second upload, and it references the very
+        # same stored file. Newest-by-normalised-email wins (see resume_store). A
+        # record without a resolvable email is still kept, keyed by a per-file id.
+        # This is best-effort: a Resume DB hiccup must never fail the primary
+        # candidate upload the recruiter is actually doing.
+        try:
+            record = resume_store.build_record(
+                org_id=access.org_id, uploader_id=user["id"], parsed=parsed,
+                name=cand["name"], source=clean_source, pdf_path=stored_name,
+                pdf_original_name=f.filename, now=now, shared=False,
+            )
+            await resume_store.upsert_fresh(record)
+        except Exception:
+            pass
+
         created.append(cand)
-    return {"created": created, "count": len(created)}
+    return {"created": created, "count": len(created), "warnings": warnings}
 
 
 @router.get("/job/{job_id}")
@@ -323,11 +346,19 @@ async def delete_candidate(candidate_id: str, user: dict = Depends(get_current_u
     # A recruiter may remove a candidate they sourced; a manager may remove any.
     if access.scope != "manager" and cand.get("sourced_by") != user["id"]:
         raise HTTPException(status_code=403, detail="You can only remove candidates you added.")
-    if cand.get("pdf_path"):
-        try:
-            os.remove(UPLOAD_DIR / cand["pdf_path"])
-        except OSError:
-            pass
+    # Remove the stored file only if nothing else still references it — another
+    # candidate moved from the Resume DB, or the Resume DB record itself, may share
+    # the same file (Cycle 5). Deleting it out from under them would break a live
+    # reference and leave a dangling PDF path.
+    pdf_path = cand.get("pdf_path")
+    if pdf_path:
+        others = await candidates.count_documents({"pdf_path": pdf_path, "id": {"$ne": candidate_id}})
+        others += await resume_db.count_documents({"pdf_path": pdf_path})
+        if others == 0:
+            try:
+                os.remove(UPLOAD_DIR / pdf_path)
+            except OSError:
+                pass
     await stage_transitions.delete_many({"candidate_id": candidate_id})
     await candidates.delete_one({"id": candidate_id})
     return {"success": True}

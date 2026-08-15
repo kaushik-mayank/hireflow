@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from database import users, organizations, job_assignments, candidates
 from admin_identity import HR_ROLE
-from models import MemberCreate, BulkMemberCreate, MemberStatusUpdate, MemberRemove
+from models import MemberCreate, BulkMemberCreate, MemberStatusUpdate, MemberRemove, SubAdminPermissions
 import permissions
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
@@ -61,6 +61,7 @@ def _parse_emails(text: str) -> list[str]:
 
 
 def _member_view(u: dict, jobs_assigned: int = 0, candidates_sourced: int = 0) -> dict:
+    caps = permissions.sanitize_capabilities(u.get("admin_permissions"))
     return {
         "id": u["id"],
         "name": u.get("name"),
@@ -71,7 +72,22 @@ def _member_view(u: dict, jobs_assigned: int = 0, candidates_sourced: int = 0) -
         "activated_at": u.get("activated_at"),
         "jobs_assigned": jobs_assigned,
         "candidates_sourced": candidates_sourced,
+        # Sub-Admin (Cycle 5): the granted org-admin capabilities. A manager has
+        # all of them implicitly; a recruiter with a non-empty list is a Sub-Admin.
+        "admin_permissions": caps,
+        "is_subadmin": (u.get("org_role") or "manager") != "manager" and bool(caps),
     }
+
+
+def _actor_may_manage(actor: dict, target: dict) -> bool:
+    """A manager may manage anyone. A Sub-Admin acting via `manage_team` may only
+    manage ordinary recruiters — never another admin, another Sub-Admin, or a
+    manager. This keeps a Sub-Admin from suspending/removing/escalating admins."""
+    if permissions.is_manager(actor):
+        return True
+    if (target.get("org_role") or "manager") == "manager":
+        return False
+    return not (target.get("admin_permissions") or [])
 
 
 async def _seats(org_id: str) -> tuple[int, int]:
@@ -119,7 +135,7 @@ async def _addability(email: str, org_id: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 @router.post("/members")
-async def add_member(body: MemberCreate, user: dict = Depends(permissions.require_manager)):
+async def add_member(body: MemberCreate, user: dict = Depends(permissions.require_capability("manage_team"))):
     org_id = user["org_id"]
     email = body.email.lower().strip()
 
@@ -144,7 +160,7 @@ async def add_member(body: MemberCreate, user: dict = Depends(permissions.requir
 
 
 @router.post("/members/bulk")
-async def add_members_bulk(body: BulkMemberCreate, user: dict = Depends(permissions.require_manager)):
+async def add_members_bulk(body: BulkMemberCreate, user: dict = Depends(permissions.require_capability("manage_team"))):
     """Approve many emails at once. Adds up to the remaining seats and reports
     every skipped entry with a reason, so nothing fails silently."""
     org_id = user["org_id"]
@@ -185,7 +201,7 @@ async def add_members_bulk(body: BulkMemberCreate, user: dict = Depends(permissi
 # ---------------------------------------------------------------------------
 
 @router.get("/members")
-async def list_members(user: dict = Depends(permissions.require_manager)):
+async def list_members(user: dict = Depends(permissions.require_capability("manage_team"))):
     members = await users.find(
         {"org_id": user["org_id"], "status": {"$in": list(MEMBER_STATUSES)}}, {"_id": 0}
     ).to_list(1000)
@@ -207,7 +223,7 @@ async def list_members(user: dict = Depends(permissions.require_manager)):
 
 
 @router.patch("/members/{member_id}")
-async def update_member(member_id: str, body: MemberStatusUpdate, user: dict = Depends(permissions.require_manager)):
+async def update_member(member_id: str, body: MemberStatusUpdate, user: dict = Depends(permissions.require_capability("manage_team"))):
     if body.status not in ("active", "disabled"):
         raise HTTPException(status_code=400, detail="Status must be 'active' or 'disabled'.")
     if member_id == user["id"]:
@@ -216,6 +232,11 @@ async def update_member(member_id: str, body: MemberStatusUpdate, user: dict = D
     target = await users.find_one({"id": member_id, "org_id": user["org_id"]}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Member not found")
+
+    # A Sub-Admin (manage_team) may only act on ordinary recruiters, never on a
+    # manager or another admin — enforced server-side, not just hidden in the UI.
+    if not _actor_may_manage(user, target):
+        raise HTTPException(status_code=403, detail="Only an admin can manage another admin.")
 
     # An org must always keep at least one active admin.
     if body.status == "disabled" and target.get("org_role") == "manager":
@@ -231,7 +252,7 @@ async def update_member(member_id: str, body: MemberStatusUpdate, user: dict = D
 
 
 @router.delete("/members/{member_id}")
-async def remove_member(member_id: str, body: MemberRemove = MemberRemove(), user: dict = Depends(permissions.require_manager)):
+async def remove_member(member_id: str, body: MemberRemove = MemberRemove(), user: dict = Depends(permissions.require_capability("manage_team"))):
     """Remove a member. A never-signed-in approval is simply deleted (frees the
     seat). An active member's work is **reassigned first** so nothing is orphaned:
     their active assignments move to `reassign_to` (or are revoked if null) and
@@ -242,6 +263,10 @@ async def remove_member(member_id: str, body: MemberRemove = MemberRemove(), use
     target = await users.find_one({"id": member_id, "org_id": org_id}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Member not found")
+
+    # A Sub-Admin (manage_team) may only remove ordinary recruiters.
+    if not _actor_may_manage(user, target):
+        raise HTTPException(status_code=403, detail="Only an admin can manage another admin.")
 
     # Never-activated approval: drop it, freeing the seat.
     if target.get("status") in PENDING_STATUSES:
@@ -293,6 +318,54 @@ async def remove_member(member_id: str, body: MemberRemove = MemberRemove(), use
 
     await users.update_one({"id": member_id}, {"$set": {"status": "disabled", "removed_at": now}})
     return {"success": True, "removed": True, "reassigned_to": reassign_to}
+
+
+# ---------------------------------------------------------------------------
+# Sub-Admin capabilities (manager only) — Cycle 5
+# ---------------------------------------------------------------------------
+
+@router.get("/capabilities")
+async def list_capabilities(user: dict = Depends(permissions.require_manager)):
+    """The catalogue of grantable Sub-Admin capabilities, so the admin UI never
+    hard-codes the list. Manager-only: a recruiter has no business enumerating it."""
+    labels = {
+        "post_jobs": "Post & edit jobs",
+        "delete_jobs": "Close & delete jobs",
+        "manage_team": "Manage team members",
+        "assign_jobs": "Assign jobs to recruiters",
+        "view_reports": "View team reports",
+    }
+    return [{"id": cap, "label": labels.get(cap, cap)} for cap in permissions.ADMIN_CAPABILITIES]
+
+
+@router.put("/members/{member_id}/permissions")
+async def set_member_permissions(
+    member_id: str,
+    body: SubAdminPermissions,
+    user: dict = Depends(permissions.require_manager),
+):
+    """Promote a recruiter to Sub-Admin (or edit / revoke their capabilities).
+
+    **Manager-only, deliberately** — a Sub-Admin can never grant, modify or revoke
+    capabilities, not even their own, so this route goes through `require_manager`,
+    not `require_capability("manage_team")`. An empty list demotes back to an
+    ordinary recruiter. Managers are never targets (they already hold everything).
+    """
+    if member_id == user["id"]:
+        raise HTTPException(status_code=400, detail="You can't change your own permissions.")
+
+    target = await users.find_one({"id": member_id, "org_id": user["org_id"]}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if (target.get("org_role") or "manager") == "manager":
+        raise HTTPException(status_code=400, detail="Admins already have every capability.")
+    if target.get("status") not in ("approved", "active"):
+        raise HTTPException(status_code=400, detail="You can only set permissions for an active teammate.")
+
+    caps = permissions.sanitize_capabilities(body.admin_permissions)
+    await users.update_one({"id": member_id}, {"$set": {"admin_permissions": caps}})
+    target["admin_permissions"] = caps
+    return _member_view(target)
 
 
 # ---------------------------------------------------------------------------

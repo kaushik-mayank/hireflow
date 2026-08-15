@@ -7,6 +7,7 @@ from database import users, login_activity, organizations
 from auth import hash_password, verify_password, create_token, get_current_user
 from admin_identity import effective_role, HR_ROLE
 from models import SignupRequest, LoginRequest, FirebaseAuthRequest, OnboardingCheck
+import permissions
 import firebase_auth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -28,6 +29,16 @@ def _public_user(u: dict) -> dict:
         "org_id": u.get("org_id"),
         "org_role": u.get("org_role") or "manager",
         "status": u.get("status") or "active",
+        # Sub-Admin (Cycle 5): the org-admin capabilities this user holds, so the
+        # frontend can show/hide admin controls to match what the server enforces.
+        # A manager holds every capability implicitly; a recruiter holds only what
+        # was granted. `is_subadmin` is true for a recruiter with a non-empty grant.
+        "admin_permissions": (
+            list(permissions.ADMIN_CAPABILITIES)
+            if (u.get("org_role") or "manager") == "manager"
+            else permissions.sanitize_capabilities(u.get("admin_permissions"))
+        ),
+        "is_subadmin": permissions.is_subadmin(u),
     }
 
 
