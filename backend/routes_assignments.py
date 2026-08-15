@@ -32,7 +32,11 @@ def _now_iso() -> str:
 
 
 async def _manager_job_or_404(job_id: str, org_id: str) -> dict:
-    job = await jobs.find_one({"id": job_id, "org_id": org_id}, {"_id": 0})
+    # Only **team** jobs are assignable — a normal user's personal job is private
+    # to them and never assigned to others, so it must never be reachable here.
+    job = await jobs.find_one(
+        {"id": job_id, "org_id": org_id, "origin": {"$ne": "personal"}}, {"_id": 0}
+    )
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
@@ -184,6 +188,20 @@ async def revoke_assignment(job_id: str, member_id: str, user: dict = Depends(pe
 # ---------------------------------------------------------------------------
 # A recruiter's own assignments
 # ---------------------------------------------------------------------------
+
+@mine_router.get("/recruiters")
+async def assignable_recruiters(user: dict = Depends(permissions.require_capability("assign_jobs"))):
+    """The recruiter roster the assignment picker needs, gated by `assign_jobs`
+    (NOT `manage_team`) — assigning a job shouldn't require team-management rights.
+    Managers hold every capability, so they use this too. Returns only the minimal
+    fields the picker shows; org-scoped, so no cross-org recruiter ever appears."""
+    rows = await users.find(
+        {"org_id": user["org_id"], "org_role": permissions.RECRUITER,
+         "status": {"$in": ["active", "approved"]}},
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "status": 1, "org_role": 1},
+    ).to_list(1000)
+    return rows
+
 
 @mine_router.get("/mine")
 async def my_assignments(user: dict = Depends(permissions.require_org_member)):

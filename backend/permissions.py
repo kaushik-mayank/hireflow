@@ -40,6 +40,11 @@ DEFAULT_PERMISSIONS = {
 }
 PERMISSION_FLAGS = tuple(DEFAULT_PERMISSIONS.keys())
 MANAGER_PERMISSIONS = {flag: True for flag in DEFAULT_PERMISSIONS}
+# A Sub-Admin *viewing* a team job they neither own nor are assigned to gets
+# visibility only — they can see the job and its candidates for oversight, but
+# every content action (upload, move, reject, AI, close) is off. Job-level
+# management for them comes from their explicit capabilities, not this map.
+READONLY_PERMISSIONS = {flag: False for flag in DEFAULT_PERMISSIONS}
 
 
 def sanitize_permissions(raw) -> dict:
@@ -61,13 +66,18 @@ def sanitize_permissions(raw) -> dict:
 # the ones stored in their user doc's `admin_permissions`. A normal recruiter has
 # none. Only a manager can grant/modify/revoke them (never a sub-admin), which is
 # enforced where those endpoints live.
+#
+# NOTE (Cycle 5 correction): `post_jobs` was removed. Every user can already
+# create their own (personal) job, so a "post jobs" grant added nothing
+# meaningful — the real team-level job capability is `assign_jobs`. A Sub-Admin's
+# created jobs become *team* jobs automatically by virtue of the role (see
+# `create_job` / `resolve_job_access`), not through a separate permission.
 # ---------------------------------------------------------------------------
 ADMIN_CAPABILITIES = (
-    "post_jobs",      # create org jobs (visible to the team), edit them
-    "delete_jobs",    # close / delete org jobs
+    "delete_jobs",    # close / delete team jobs (not just your own)
     "manage_team",    # approve / suspend / remove teammates
-    "assign_jobs",    # assign jobs to recruiters, set permissions/targets
-    "view_reports",   # the manager team report + CSV export
+    "assign_jobs",    # assign team jobs to recruiters, set permissions/targets
+    "view_reports",   # the team report (Overview + Team) + CSV export
 )
 _CAP_DENIED = "You don't have permission to do this. Ask your admin."
 
@@ -174,17 +184,30 @@ async def resolve_job_access(user: dict, job_id: str) -> JobAccess:
     if not job:
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
 
-    # A personal job (a recruiter's own) is visible ONLY to its creator, who has
-    # full control over it. Not even the org's manager can see someone else's.
+    # A personal job (a normal user's own) is visible ONLY to its creator, who has
+    # full control over it. Not even the org's manager or a Sub-Admin can see
+    # someone else's personal job — that privacy is deliberate and preserved.
     if job.get("origin") == "personal":
         if job.get("created_by") == user["id"]:
             return JobAccess(job=job, assignment=None, permissions=dict(MANAGER_PERMISSIONS),
                              scope="owner", org_id=org_id)
         raise HTTPException(status_code=404, detail=_NOT_FOUND)
 
+    # --- Team (org) job ---
+    # A manager controls every team job. The job's own creator (a manager or a
+    # Sub-Admin) fully controls what they created. Any *other* Sub-Admin gets
+    # read-only visibility (role hierarchy: admins/sub-admins see team jobs whether
+    # or not they're assigned — §5). A normal recruiter reaches it only via an
+    # active assignment; otherwise it 404s (we don't confirm it exists).
     if is_manager(user):
         return JobAccess(job=job, assignment=None, permissions=dict(MANAGER_PERMISSIONS),
                          scope="manager", org_id=org_id)
+    if job.get("created_by") == user["id"]:
+        return JobAccess(job=job, assignment=None, permissions=dict(MANAGER_PERMISSIONS),
+                         scope="owner", org_id=org_id)
+    if is_subadmin(user):
+        return JobAccess(job=job, assignment=None, permissions=dict(READONLY_PERMISSIONS),
+                         scope="subadmin", org_id=org_id)
 
     assignment = await job_assignments.find_one(
         {"job_id": job_id, "user_id": user["id"], "status": "active"}, {"_id": 0}
@@ -196,6 +219,25 @@ async def resolve_job_access(user: dict, job_id: str) -> JobAccess:
     permissions = {**DEFAULT_PERMISSIONS, **(assignment.get("permissions") or {})}
     return JobAccess(job=job, assignment=assignment, permissions=permissions,
                      scope="assigned", org_id=org_id)
+
+
+def can_assign_job(user: dict, access: "JobAccess") -> bool:
+    """May the caller assign this job to recruiters? Managers always; a Sub-Admin
+    only with `assign_jobs`. Never a personal job (those aren't team-assignable)."""
+    if access.job.get("origin") == "personal":
+        return False
+    return is_manager(user) or has_capability(user, "assign_jobs")
+
+
+def can_close_or_delete_job(user: dict, access: "JobAccess") -> bool:
+    """May the caller close/delete this job? The owner/manager always; a Sub-Admin
+    with `delete_jobs` may close/delete any *team* job (the 'Close & delete jobs'
+    capability). A personal job is only ever its owner's to remove."""
+    if access.scope in ("manager", "owner"):
+        return True
+    if access.job.get("origin") != "personal" and has_capability(user, "delete_jobs"):
+        return True
+    return False
 
 
 def require_permission(access: JobAccess, flag: str) -> None:
@@ -226,17 +268,45 @@ async def accessible_job_ids(user: dict):
     return [r["job_id"] for r in rows]
 
 
+def sees_all_org_jobs(user: dict) -> bool:
+    """True for anyone in the admin tier — a manager or *any* Sub-Admin. They see
+    every team (org-origin) job in their org, assigned or not, because a
+    Sub-Admin's created jobs are team jobs and admins/sub-admins oversee the team
+    (§5). A plain recruiter is False (assignment-scoped)."""
+    return is_manager(user) or is_subadmin(user)
+
+
 async def visible_jobs_query(user: dict) -> dict:
-    """A Mongo filter for the jobs this user may list or aggregate over:
-    - a **manager** sees every org (non-personal) job, plus their own personal jobs;
-    - a **recruiter** sees the org jobs they're actively assigned to, plus their
-      own personal jobs.
-    Personal jobs are visible only to whoever created them. Used everywhere jobs
-    are listed in bulk (jobs list, dashboard, reports) so personal jobs never leak.
+    """A Mongo filter for the jobs this user's **personal metrics** cover (reports
+    Overview, dashboard): a **manager** aggregates the whole org; everyone else —
+    including a Sub-Admin — sees only the jobs they're assigned to plus their own,
+    so a Sub-Admin's *own activity* stays their own. Job *listing* visibility is
+    broader for the admin tier; use `team_visible_jobs_query` for that.
     """
     org_id = user.get("org_id")
     own_personal = {"origin": "personal", "created_by": user["id"]}
     if is_manager(user):
+        return {"org_id": org_id, "$or": [{"origin": {"$ne": "personal"}}, own_personal]}
+    rows = await job_assignments.find(
+        {"org_id": org_id, "user_id": user["id"], "status": "active"},
+        {"_id": 0, "job_id": 1},
+    ).to_list(100000)
+    assigned = [r["job_id"] for r in rows]
+    return {"org_id": org_id, "$or": [{"id": {"$in": assigned}}, own_personal]}
+
+
+async def team_visible_jobs_query(user: dict) -> dict:
+    """A Mongo filter for the jobs shown in the **Jobs list**:
+    - a **manager or Sub-Admin** sees every team (org-origin) job — created by any
+      admin/sub-admin — plus their own personal jobs (regardless of assignment);
+    - a **recruiter** sees the team jobs they're actively assigned to, plus their
+      own personal jobs.
+    Personal jobs stay visible only to their creator, so a normal user's private
+    job never leaks and a normal user never sees the whole org's jobs.
+    """
+    org_id = user.get("org_id")
+    own_personal = {"origin": "personal", "created_by": user["id"]}
+    if sees_all_org_jobs(user):
         return {"org_id": org_id, "$or": [{"origin": {"$ne": "personal"}}, own_personal]}
     rows = await job_assignments.find(
         {"org_id": org_id, "user_id": user["id"], "status": "active"},

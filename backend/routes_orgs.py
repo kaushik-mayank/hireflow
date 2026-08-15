@@ -329,13 +329,21 @@ async def list_capabilities(user: dict = Depends(permissions.require_manager)):
     """The catalogue of grantable Sub-Admin capabilities, so the admin UI never
     hard-codes the list. Manager-only: a recruiter has no business enumerating it."""
     labels = {
-        "post_jobs": "Post & edit jobs",
         "delete_jobs": "Close & delete jobs",
         "manage_team": "Manage team members",
         "assign_jobs": "Assign jobs to recruiters",
         "view_reports": "View team reports",
     }
-    return [{"id": cap, "label": labels.get(cap, cap)} for cap in permissions.ADMIN_CAPABILITIES]
+    descriptions = {
+        "delete_jobs": "Close or delete team jobs, not just their own.",
+        "manage_team": "Approve, suspend and remove teammates.",
+        "assign_jobs": "Assign team jobs to recruiters and set their targets.",
+        "view_reports": "See the team report — Overview and Team.",
+    }
+    return [
+        {"id": cap, "label": labels.get(cap, cap), "description": descriptions.get(cap, "")}
+        for cap in permissions.ADMIN_CAPABILITIES
+    ]
 
 
 @router.put("/members/{member_id}/permissions")

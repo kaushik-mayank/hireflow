@@ -4,8 +4,55 @@
 > Newest entries at the top.
 
 **Project root:** `.../Hireflow/hireflow-main 22072027/hireflow-main 22072027/` (note the doubled folder name — the *inner* one is the real root)
-**Current phase:** 🟢 **Cycle 5 — Sub-Admins, Resume DB, expanded resume parsing (PDF/DOC/DOCX). Backend done + 369 offline tests green (fwd+rev). Owner env steps still pending: `CI=true yarn build` for the new/edited frontend, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
-**Last updated:** 2026-08-15
+**Current phase:** 🟢 **Cycle 5 (+ correction pass) — Sub-Admins, Resume DB, expanded parsing, then the permission/visibility/reports correction. Backend done + 388 offline tests green (fwd+rev). Owner env steps still pending: `CI=true yarn build` for the frontend, migration vs DB copy, enable Firebase email-link.** Live: frontend `https://hireflow.cortinix.com`, backend `https://hireflow-w04l.onrender.com`.
+**Last updated:** 2026-08-16
+
+---
+
+## Session 37 — 2026-08-16 — Cycle 5 correction pass: Sub-Admin permission model, job visibility, reports tabs, "Created by"
+
+Owner-reported irregularities in the Session 36 Sub-Admin work. Root-caused and fixed through the existing spine (no parallel systems). **Backend done + 388 offline tests green forward *and* reverse (26 new/changed). Frontend written to existing patterns, unbuilt** (no Node locally).
+
+### Permission model correction — `post_jobs` removed (was redundant)
+- **Root cause:** every user can already create a *personal* job, so a "Post & edit jobs" grant added nothing meaningful — pure overlap. The real team capability is `assign_jobs`.
+- **`ADMIN_CAPABILITIES` is now four** (`delete_jobs`, `manage_team`, `assign_jobs`, `view_reports`). `post_jobs` is gone from the enum, the `/orgs/capabilities` catalogue, `create_job`, checks, tests and docs — not left dead in the backend while hidden in the UI. `sanitize_capabilities` now drops `post_jobs` as unknown, so any stored grant is inert.
+- A **Sub-Admin's created jobs become *team* jobs by virtue of the role**, not a permission: `create_job` origin = `"org" if sees_all_org_jobs(user) else "personal"` (`sees_all_org_jobs` = manager **or** any sub-admin). A normal user's jobs stay personal exactly as before.
+
+### Job visibility (§5) — admins & sub-admins see team jobs; users unchanged
+- **Root cause:** the visibility spine only broadened for *managers*; sub-admins were treated as plain recruiters, so they couldn't see team jobs (their own or others') unless assigned.
+- Added **`permissions.team_visible_jobs_query`** (used only by the Jobs list) — a manager **or sub-admin** sees every team (org-origin) job + their own personal jobs; a recruiter sees assigned + own. **`visible_jobs_query` is deliberately unchanged** and still drives Reports-Overview/dashboard, so a Sub-Admin's *own metrics stay their own* (§1) even though their *listing* is broad.
+- **`resolve_job_access`** gained an `owner`-for-team-jobs branch (the creator fully controls what they created, manager or sub-admin) and a read-only **`subadmin`** scope (a sub-admin viewing a team job they neither own nor are assigned to — visible, but every content action off via `READONLY_PERMISSIONS`). Personal jobs stay private to their creator — no manager/sub-admin leak.
+- Normal-user visibility is untouched: a recruiter still sees only assigned team jobs + their own personal jobs, never the whole org.
+
+### `assign_jobs` = the meaningful team capability (§3, §7)
+- The existing Admin assignment endpoints already required `assign_jobs` (Session 36). Added **`GET /assignments/recruiters`** gated by `assign_jobs` (NOT `manage_team`) so an assign-only Sub-Admin can load the recruiter roster for the picker — assigning shouldn't require team-management rights. `AssignmentPanel` now uses it instead of `orgsApi.members()`.
+- **`_manager_job_or_404` now excludes personal jobs** (`origin != personal`) — a normal user's private job is never team-assignable, by anyone.
+- `get_job` returns server-computed **`can_assign`** (`can_assign_job`: manager, or `assign_jobs` on a team job) and **`can_close_or_delete`**; the JobDetail Team/assignment tab follows `can_assign`, not the old `access_scope === "manager"`.
+
+### Close & delete (§4) — coherent under one capability
+- `delete_job` and closing (`update_job` status→closed) now both go through **`can_close_or_delete_job`**: owner/manager always; a Sub-Admin with `delete_jobs` may close/**delete any team job**; a personal job is only ever its owner's to remove. A `delete_jobs` sub-admin still **cannot edit job meta** (owner/manager only — `post_jobs` is gone). Pause/reactivate stays owner/manager.
+
+### Reports (§1, §10) — Overview + Team for `view_reports` Sub-Admins
+- **Root cause:** the Reports toggle was gated on `isManager`, so a `view_reports` Sub-Admin got no Team tab even though the API allowed it.
+- Frontend `Reports.jsx` now shows the **Overview / Team** toggle when `isManager || admin_permissions.includes("view_reports")`. Overview stays each person's own activity (a Sub-Admin's is personal via the unchanged `visible_jobs_query`); Team reuses the existing `TeamReport` + `GET /reports/team`.
+- **Server-side already enforced** and unchanged: `GET /reports/team` and `/reports/team/export.csv` are `require_capability("view_reports")` — a Sub-Admin without it gets 403 whether they hit the API directly, manipulate the URL, or force frontend state. Hiding the tab is not the control; the dependency is.
+
+### "Created by" attribution (§6)
+- The Job model already persists `created_by` (set at creation; legacy rows fall back to `user_id`). Added `routes_jobs._attach_creator_names` (one batched `users` lookup) so **`list_jobs` and `get_job` return `created_by_name`** — the real persisted creator, never the viewer or assignee. Missing/legacy creator → `None` (rendered "—"), never invented.
+- Frontend: Jobs cards show "Created by <name>"; JobDetail adds it to the header subtitle. Uses existing card/label patterns.
+
+### Role hierarchy / no escalation (§9) — reconfirmed
+- Promotion stays **manager-only** (`require_manager` on `PUT /orgs/members/{id}/permissions`); a Sub-Admin — even with `manage_team` — cannot promote, assign permissions, modify its own, or act on a manager/another admin (`_actor_may_manage`). All still enforced server-side and covered by tests.
+
+### Tests (388 offline, fwd+rev; +26 changed/new)
+- Updated every `post_jobs` reference; added `test_post_jobs_capability_is_gone`.
+- New in `test_cycle5.py`: create-origin by role (manager/sub-admin=team, user=personal); list visibility (sub-admin sees all team jobs incl. another sub-admin's, unassigned; user sees only own; manager sees a sub-admin's team job); `created_by_name` attach + legacy-None; delete/close gating (`delete_jobs` can delete+close a team job but not edit; without it 403; recruiter 403; sub-admin owner fully controls own); assignment (`assignable_recruiters` gated by `assign_jobs`, org-scoped; assign a team job; **personal job not assignable → 404**); reports (`view_reports` gate allows manager + granted sub-admin, denies user + other sub-admin); `can_assign_job`/`can_close_or_delete_job` helpers.
+- Extended `test_assignments.py`'s fake matcher with `$ne` (routes now filter `origin`), per the documented "add operators when a route uses them" pattern. `test_org_isolation.py` create-origin tests still green under the new role-based origin.
+
+### Decisions / limitations
+- **Sub-Admin ≠ manager for job *content*.** A sub-admin sees team jobs and their candidates read-only (oversight), but content actions (upload/move/AI/close) need ownership, assignment, or the specific capability — so being a sub-admin never silently broadens job-content power (§3 "don't accidentally broaden").
+- **Team-job assignment is org-wide for `assign_jobs` holders** (matches the reused Admin assignment flow), scoped to non-personal jobs in their own org. Cross-org stays 404.
+- Frontend unbuilt here (no Node) — static-checked (brackets balanced, imports cleaned: `AssignmentPanel` no longer imports `orgsApi`). Needs `CI=true yarn build` + QA of: Sub-Admin Reports tabs (with/without `view_reports`), team-job visibility for admins/sub-admins vs users, assign flow for an `assign_jobs`-only sub-admin, close/delete for a `delete_jobs` sub-admin, and "Created by" on cards + detail.
 
 ---
 

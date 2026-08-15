@@ -220,7 +220,9 @@ def world():
 
     for mdl in ("StageUpdate", "NoteUpdate", "BulkStageUpdate", "ResumeShareUpdate",
                 "ResumeMoveToJob", "SubAdminPermissions", "MemberCreate",
-                "BulkMemberCreate", "MemberStatusUpdate", "MemberRemove"):
+                "BulkMemberCreate", "MemberStatusUpdate", "MemberRemove",
+                "JobCreate", "JobUpdate", "AssignmentUpsert", "BulkAssignmentUpsert",
+                "JDOverrideUpdate"):
         _merge_stub("models", **{mdl: object})
 
     import ai_service
@@ -241,8 +243,11 @@ def world():
     import routes_candidates
     import routes_resume_db
     import routes_orgs
+    import routes_jobs
+    import routes_assignments
 
-    modules = (permissions, resume_store, routes_candidates, routes_resume_db, routes_orgs)
+    modules = (permissions, resume_store, routes_candidates, routes_resume_db,
+               routes_orgs, routes_jobs, routes_assignments)
     for module in modules:
         for name, coll in colls.items():
             if hasattr(module, name):
@@ -256,7 +261,8 @@ def world():
 
     return types.SimpleNamespace(
         p=permissions, store=resume_store, cand_r=routes_candidates,
-        rdb=routes_resume_db, orgs=routes_orgs, colls=colls, upload_dir=upload_dir,
+        rdb=routes_resume_db, orgs=routes_orgs, jobs_r=routes_jobs,
+        asg_r=routes_assignments, colls=colls, upload_dir=upload_dir,
         ai=ai_service, exc=sys.modules["fastapi"].HTTPException,
     )
 
@@ -283,6 +289,15 @@ def run(coro):
 
 def _ns(**kw):
     return types.SimpleNamespace(**kw)
+
+
+class _UpdBody:
+    """Stand-in for a JobUpdate pydantic body: model_dump returns only set fields."""
+    def __init__(self, **kw):
+        self._d = kw
+
+    def model_dump(self, exclude_unset=True):
+        return dict(self._d)
 
 
 def _reset(world):
@@ -619,14 +634,25 @@ def test_has_capability_manager_has_all(world):
 
 
 def test_has_capability_recruiter_only_granted(world):
-    sub = _subadmin(["post_jobs"])
-    assert world.p.has_capability(sub, "post_jobs") is True
+    sub = _subadmin(["assign_jobs"])
+    assert world.p.has_capability(sub, "assign_jobs") is True
     assert world.p.has_capability(sub, "manage_team") is False
-    assert world.p.has_capability(REC_A, "post_jobs") is False
+    assert world.p.has_capability(REC_A, "assign_jobs") is False
+
+
+def test_post_jobs_capability_is_gone(world):
+    # Cycle 5 correction: `post_jobs` was removed (redundant with personal jobs);
+    # it must not survive anywhere as a grantable capability.
+    assert "post_jobs" not in world.p.ADMIN_CAPABILITIES
+    assert set(world.p.ADMIN_CAPABILITIES) == {"delete_jobs", "manage_team", "assign_jobs", "view_reports"}
+    assert world.p.sanitize_capabilities(["post_jobs"]) == []          # dropped as unknown
+    assert world.p.has_capability(_subadmin(["post_jobs"]), "post_jobs") is True  # literal membership only
+    # ...but it grants nothing real: a "post_jobs" holder isn't treated as having any known cap.
+    assert world.p.has_capability(_subadmin(["post_jobs"]), "assign_jobs") is False
 
 
 def test_is_subadmin_detection(world):
-    assert world.p.is_subadmin(_subadmin(["post_jobs"])) is True
+    assert world.p.is_subadmin(_subadmin(["view_reports"])) is True
     assert world.p.is_subadmin(REC_A) is False
     assert world.p.is_subadmin(MANAGER_A) is False  # a manager isn't a "sub"-admin
 
@@ -642,18 +668,19 @@ def test_require_capability_allows_and_denies(world):
 
 
 def test_sanitize_capabilities_drops_unknown(world):
-    assert world.p.sanitize_capabilities(["post_jobs", "hack_everything", "manage_team"]) == \
-        ["post_jobs", "manage_team"]
+    # Unknown caps dropped; result follows the canonical ADMIN_CAPABILITIES order.
+    assert world.p.sanitize_capabilities(["assign_jobs", "hack_everything", "manage_team"]) == \
+        ["manage_team", "assign_jobs"]
     assert world.p.sanitize_capabilities("not a list") == []
 
 
 def test_manager_promotes_and_revokes_subadmin(world):
     _reset(world)
     world.colls["users"].docs = [{**REC_A, "status": "active"}]
-    out = run(world.orgs.set_member_permissions("rec-A", _ns(admin_permissions=["post_jobs", "view_reports"]), MANAGER_A))
+    out = run(world.orgs.set_member_permissions("rec-A", _ns(admin_permissions=["assign_jobs", "view_reports"]), MANAGER_A))
     assert out["is_subadmin"] is True
-    assert set(out["admin_permissions"]) == {"post_jobs", "view_reports"}
-    assert world.colls["users"].docs[0]["admin_permissions"] == ["post_jobs", "view_reports"]
+    assert set(out["admin_permissions"]) == {"assign_jobs", "view_reports"}
+    assert world.colls["users"].docs[0]["admin_permissions"] == ["assign_jobs", "view_reports"]
     # Revoke by sending an empty list → back to an ordinary recruiter.
     out2 = run(world.orgs.set_member_permissions("rec-A", _ns(admin_permissions=[]), MANAGER_A))
     assert out2["is_subadmin"] is False and out2["admin_permissions"] == []
@@ -663,7 +690,7 @@ def test_promotion_rejects_self_and_manager_target(world):
     _reset(world)
     world.colls["users"].docs = [dict(MANAGER_A)]
     with pytest.raises(world.exc) as e:
-        run(world.orgs.set_member_permissions("mgr-A", _ns(admin_permissions=["post_jobs"]), MANAGER_A))
+        run(world.orgs.set_member_permissions("mgr-A", _ns(admin_permissions=["assign_jobs"]), MANAGER_A))
     assert e.value.status_code == 400  # can't set own permissions
 
 
@@ -672,7 +699,7 @@ def test_promotion_target_must_be_recruiter(world):
     world.colls["users"].docs = [dict(MANAGER_A), {"id": "mgr-A2", "org_id": "org-A", "org_role": "manager",
                                                     "name": "Mgr A2", "status": "active"}]
     with pytest.raises(world.exc) as e:
-        run(world.orgs.set_member_permissions("mgr-A2", _ns(admin_permissions=["post_jobs"]), MANAGER_A))
+        run(world.orgs.set_member_permissions("mgr-A2", _ns(admin_permissions=["assign_jobs"]), MANAGER_A))
     assert e.value.status_code == 400  # admins already have every capability
 
 
@@ -697,7 +724,7 @@ def test_subadmin_cannot_suspend_a_manager(world):
 def test_subadmin_cannot_remove_another_subadmin(world):
     _reset(world)
     other_sub = {"id": "sub-B", "org_id": "org-A", "org_role": "recruiter",
-                 "status": "active", "admin_permissions": ["post_jobs"]}
+                 "status": "active", "admin_permissions": ["view_reports"]}
     world.colls["users"].docs = [other_sub]
     sub = _subadmin(["manage_team"])
     with pytest.raises(world.exc) as e:
@@ -723,7 +750,222 @@ def test_manager_unaffected_can_manage_recruiter(world):
 
 
 def test_member_view_exposes_capabilities(world):
-    sub = {"id": "sub-A", "org_role": "recruiter", "admin_permissions": ["post_jobs", "bogus"]}
+    sub = {"id": "sub-A", "org_role": "recruiter", "admin_permissions": ["assign_jobs", "bogus"]}
     view = world.orgs._member_view(sub)
-    assert view["admin_permissions"] == ["post_jobs"]  # sanitised
+    assert view["admin_permissions"] == ["assign_jobs"]  # sanitised
     assert view["is_subadmin"] is True
+
+
+# ===========================================================================
+# Cycle 5 correction — job visibility, team assignment, close/delete, reports
+# ===========================================================================
+
+def _job_body(**kw):
+    base = {"title": "Role", "department": None, "openings_needed": 1, "jd_text": None,
+            "jd_enhanced": None, "deadline": None, "status": "active", "hiring_for": None,
+            "custom_stages": None}
+    base.update(kw)
+    return _ns(**base)
+
+
+def _team_job(**kw):
+    base = {"id": "job-T", "org_id": "org-A", "origin": "org", "created_by": "mgr-A",
+            "title": "Engineer", "status": "active", "openings_needed": 1,
+            "created_at": "2026-02-01T00:00:00+00:00"}
+    base.update(kw)
+    return base
+
+
+# ---- create_job origin: role decides team vs personal (no post_jobs) ----
+
+def test_manager_creates_team_job(world):
+    _reset(world)
+    out = run(world.jobs_r.create_job(_job_body(title="Nurse"), MANAGER_A))
+    assert out["origin"] == "org"
+
+
+def test_subadmin_created_job_is_a_team_job(world):
+    _reset(world)
+    sub = _subadmin(["view_reports"])  # any capability → admin tier
+    out = run(world.jobs_r.create_job(_job_body(title="Sub role"), sub))
+    assert out["origin"] == "org" and out["created_by"] == "sub-A"
+
+
+def test_normal_user_created_job_stays_personal(world):
+    _reset(world)
+    out = run(world.jobs_r.create_job(_job_body(title="My role"), REC_A))
+    assert out["origin"] == "personal" and out["created_by"] == "rec-A"
+
+
+# ---- list visibility: admins/sub-admins see team jobs; users don't ----
+
+def test_subadmin_sees_all_team_jobs_unassigned(world):
+    _reset(world)
+    world.colls["jobs"].docs = [
+        _team_job(id="j-mgr", created_by="mgr-A"),
+        _team_job(id="j-sub2", created_by="sub-B"),  # another sub-admin's team job
+        {"id": "j-pers", "org_id": "org-A", "origin": "personal", "created_by": "rec-A",
+         "title": "Priv", "status": "active", "created_at": "2026-02-01T00:00:00+00:00"},
+    ]
+    sub = _subadmin(["view_reports"])
+    rows = run(world.jobs_r.list_jobs(sub))
+    ids = {r["id"] for r in rows}
+    assert ids == {"j-mgr", "j-sub2"}          # both team jobs, neither assigned
+    assert "j-pers" not in ids                 # never another user's personal job
+
+
+def test_normal_user_does_not_see_team_jobs(world):
+    _reset(world)
+    world.colls["jobs"].docs = [
+        _team_job(id="j-mgr", created_by="mgr-A"),
+        {"id": "j-own", "org_id": "org-A", "origin": "personal", "created_by": "rec-A",
+         "title": "Mine", "status": "active", "created_at": "2026-02-01T00:00:00+00:00"},
+    ]
+    rows = run(world.jobs_r.list_jobs(REC_A))   # no assignments
+    assert {r["id"] for r in rows} == {"j-own"}  # only their own personal job
+
+
+def test_manager_sees_subadmin_created_team_job(world):
+    _reset(world)
+    world.colls["jobs"].docs = [_team_job(id="j-sub", created_by="sub-B")]
+    rows = run(world.jobs_r.list_jobs(MANAGER_A))
+    assert {r["id"] for r in rows} == {"j-sub"}  # admin sees a sub-admin's team job
+
+
+# ---- created_by attribution comes from persisted creator ----
+
+def test_list_attaches_created_by_name(world):
+    _reset(world)
+    world.colls["users"].docs = [{"id": "mgr-A", "org_id": "org-A", "name": "Alice Admin"}]
+    world.colls["jobs"].docs = [_team_job(id="j1", created_by="mgr-A")]
+    rows = run(world.jobs_r.list_jobs(MANAGER_A))
+    assert rows[0]["created_by_name"] == "Alice Admin"
+
+
+def test_created_by_name_none_for_legacy_job(world):
+    _reset(world)
+    world.colls["jobs"].docs = [_team_job(id="j1", created_by=None, user_id=None)]
+    rows = run(world.jobs_r.list_jobs(MANAGER_A))
+    assert rows[0]["created_by_name"] is None  # never invents attribution
+
+
+# ---- close/delete: gated by delete_jobs for non-owners ----
+
+def test_subadmin_with_delete_jobs_can_delete_team_job(world):
+    _reset(world)
+    world.colls["jobs"].docs = [_team_job(id="j1", created_by="mgr-A")]
+    sub = _subadmin(["delete_jobs"])
+    assert run(world.jobs_r.delete_job("j1", sub))["success"] is True
+    assert world.colls["jobs"].docs == []
+
+
+def test_subadmin_without_delete_jobs_cannot_delete_team_job(world):
+    _reset(world)
+    world.colls["jobs"].docs = [_team_job(id="j1", created_by="mgr-A")]
+    sub = _subadmin(["view_reports"])  # can SEE it, but not delete it
+    with pytest.raises(world.exc) as e:
+        run(world.jobs_r.delete_job("j1", sub))
+    assert e.value.status_code == 403
+    assert world.colls["jobs"].docs  # untouched
+
+
+def test_subadmin_with_delete_jobs_can_close_but_not_edit(world):
+    _reset(world)
+    world.colls["jobs"].docs = [_team_job(id="j1", created_by="mgr-A")]
+    sub = _subadmin(["delete_jobs"])
+    # Close is allowed…
+    out = run(world.jobs_r.update_job("j1", _UpdBody(status="closed"), sub))
+    assert out["status"] == "closed"
+    # …but editing meta is not (post_jobs is gone; only owner/manager edit).
+    with pytest.raises(world.exc) as e:
+        run(world.jobs_r.update_job("j1", _UpdBody(title="Renamed"), sub))
+    assert e.value.status_code == 403
+
+
+def test_recruiter_cannot_delete_team_job(world):
+    _reset(world)
+    world.colls["jobs"].docs = [_team_job(id="j1", created_by="mgr-A")]
+    world.colls["job_assignments"].docs = [
+        {"id": "as1", "org_id": "org-A", "job_id": "j1", "user_id": "rec-A", "status": "active", "permissions": {}}
+    ]
+    with pytest.raises(world.exc) as e:
+        run(world.jobs_r.delete_job("j1", REC_A))
+    assert e.value.status_code == 403
+
+
+def test_subadmin_owner_fully_controls_own_team_job(world):
+    _reset(world)
+    world.colls["jobs"].docs = [_team_job(id="j1", created_by="sub-A")]
+    sub = _subadmin(["view_reports"])  # no job caps, but they created it
+    out = run(world.jobs_r.update_job("j1", _UpdBody(title="Renamed"), sub))
+    assert out["title"] == "Renamed"  # owner rights over what you created
+    assert run(world.jobs_r.delete_job("j1", sub))["success"] is True
+
+
+# ---- assignment: assign_jobs gated, personal jobs not assignable ----
+
+def test_assignable_recruiters_requires_assign_jobs(world):
+    _reset(world)
+    world.colls["users"].docs = [
+        {"id": "rec-A", "org_id": "org-A", "org_role": "recruiter", "status": "active", "name": "Rec A", "email": "a@x"},
+        {"id": "mgr-A", "org_id": "org-A", "org_role": "manager", "status": "active", "name": "Mgr A", "email": "m@x"},
+    ]
+    dep = world.p.require_capability("assign_jobs")
+    # A manager / assign_jobs sub-admin may fetch the roster; a plain recruiter cannot.
+    run(dep(MANAGER_A))
+    run(dep(_subadmin(["assign_jobs"])))
+    with pytest.raises(world.exc) as e:
+        run(dep(REC_A))
+    assert e.value.status_code == 403
+    rows = run(world.asg_r.assignable_recruiters(MANAGER_A))
+    assert {r["id"] for r in rows} == {"rec-A"}  # only recruiters, org-scoped
+
+
+def test_subadmin_with_assign_jobs_can_assign_team_job(world):
+    _reset(world)
+    world.colls["jobs"].docs = [_team_job(id="j1", created_by="mgr-A")]
+    world.colls["users"].docs = [{"id": "rec-A", "org_id": "org-A", "org_role": "recruiter", "status": "active", "name": "Rec A"}]
+    sub = _subadmin(["assign_jobs"])
+    out = run(world.asg_r.upsert_assignment("j1", _ns(user_id="rec-A", permissions=None, status=None,
+                                                      shortlist_target=None, sourced_target=None,
+                                                      interview_target=None, deadline=None, note=None), sub))
+    assert out["user_id"] == "rec-A"
+
+
+def test_personal_job_is_not_assignable(world):
+    _reset(world)
+    world.colls["jobs"].docs = [{"id": "j-pers", "org_id": "org-A", "origin": "personal",
+                                 "created_by": "rec-A", "title": "Mine", "status": "active"}]
+    world.colls["users"].docs = [{"id": "rec-A", "org_id": "org-A", "org_role": "recruiter", "status": "active"}]
+    with pytest.raises(world.exc) as e:
+        run(world.asg_r.upsert_assignment("j-pers", _ns(user_id="rec-A", permissions=None, status=None,
+                                                        shortlist_target=None, sourced_target=None,
+                                                        interview_target=None, deadline=None, note=None), MANAGER_A))
+    assert e.value.status_code == 404  # personal jobs are never team-assignable
+
+
+# ---- reports authorization: view_reports gates the Team report ----
+
+def test_team_report_requires_view_reports(world):
+    dep = world.p.require_capability("view_reports")
+    run(dep(MANAGER_A))                      # manager: all caps
+    run(dep(_subadmin(["view_reports"])))    # granted sub-admin
+    for u in (REC_A, _subadmin(["manage_team"])):  # user + sub-admin without the cap
+        with pytest.raises(world.exc) as e:
+            run(dep(u))
+        assert e.value.status_code == 403
+
+
+# ---- can_assign / can_close helpers reflect the rules ----
+
+def test_can_assign_and_close_helpers(world):
+    _reset(world)
+    team = world.p.JobAccess(job=_team_job(created_by="mgr-A"), assignment=None,
+                             permissions={}, scope="subadmin", org_id="org-A")
+    personal = world.p.JobAccess(job={"origin": "personal", "created_by": "rec-A"}, assignment=None,
+                                 permissions={}, scope="owner", org_id="org-A")
+    assert world.p.can_assign_job(_subadmin(["assign_jobs"]), team) is True
+    assert world.p.can_assign_job(_subadmin(["view_reports"]), team) is False
+    assert world.p.can_assign_job(MANAGER_A, personal) is False        # personal never assignable
+    assert world.p.can_close_or_delete_job(_subadmin(["delete_jobs"]), team) is True
+    assert world.p.can_close_or_delete_job(_subadmin(["view_reports"]), team) is False

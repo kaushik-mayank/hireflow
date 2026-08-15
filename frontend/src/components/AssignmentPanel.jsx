@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { UserPlus, Trash2, Pencil } from "lucide-react";
-import { assignmentsApi, orgsApi, apiErr } from "@/api";
+import { assignmentsApi, apiErr } from "@/api";
 import { Card, Button, Modal, Avatar, Pill, Skeleton, EmptyState } from "@/components/ui";
 import { fmtDate } from "@/constants";
 import { toast } from "sonner";
@@ -183,9 +183,10 @@ export default function AssignmentPanel({ jobId }) {
 
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([assignmentsApi.listForJob(jobId), orgsApi.members()])
+    Promise.all([assignmentsApi.listForJob(jobId), assignmentsApi.recruiters()])
       .then(([a, m]) => {
         setAssignments(a.data);
+        // The roster endpoint already returns only assignable recruiters, org-scoped.
         setRecruiters((m.data || []).filter((x) => x.org_role === "recruiter" && x.status !== "disabled"));
       })
       .catch(() => toast.error("Could not load assignments"))

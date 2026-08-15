@@ -158,7 +158,12 @@ function Funnel({ funnel, totalCandidates }) {
 export default function Reports() {
   const { user } = useAuth();
   const isManager = (user?.org_role || "manager") === "manager";
-  const [view, setView] = useState("overview"); // "overview" | "team" (managers only)
+  // A manager, or a Sub-Admin granted `view_reports`, gets the Team tab. The
+  // Overview stays each person's own activity (a manager's is org-wide, a
+  // Sub-Admin's is their own) — the server scopes it by role. The team-report
+  // API is `view_reports`-gated server-side, so the tab can't be forced open.
+  const canViewTeam = isManager || (user?.admin_permissions || []).includes("view_reports");
+  const [view, setView] = useState("overview"); // "overview" | "team"
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -170,8 +175,9 @@ export default function Reports() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Managers can switch between their org overview and a per-recruiter team report.
-  const toggle = isManager ? (
+  // Managers and view_reports Sub-Admins switch between their Overview and the
+  // per-recruiter Team report.
+  const toggle = canViewTeam ? (
     <div className="flex gap-1 bg-gray-100 rounded-lg p-1 text-sm" data-testid="reports-view-toggle">
       {[["overview", "Overview"], ["team", "Team"]].map(([k, label]) => (
         <button
@@ -187,8 +193,8 @@ export default function Reports() {
   ) : null;
 
   // The team report loads its own data, so it can render before the personal
-  // overview has (and regardless of whether the manager has their own jobs).
-  if (isManager && view === "team") {
+  // overview has (and regardless of whether the viewer has their own jobs).
+  if (canViewTeam && view === "team") {
     return (
       <Layout>
         <Topbar title="Reports" subtitle="Team performance" actions={toggle} />

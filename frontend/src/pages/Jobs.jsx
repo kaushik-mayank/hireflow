@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Briefcase, Users, Calendar, CalendarClock, Target, Eye, Pause, Play, Ban } from "lucide-react";
+import { Plus, Search, Briefcase, Users, Calendar, CalendarClock, Target, Eye, Pause, Play, Ban, UserRound } from "lucide-react";
 import { jobsApi, apiErr } from "@/api";
 import Layout, { Topbar, PageBody } from "@/components/Layout";
 import { Card, Button, ProgressBar, Skeleton, EmptyState, Modal } from "@/components/ui";
@@ -10,9 +10,17 @@ import { toast } from "sonner";
 
 export default function Jobs() {
   const { user } = useAuth();
-  // Only an org manager ("Admin") creates jobs and pauses/reactivates them;
-  // recruiters see the roles assigned to them, read-only at the list level.
+  // Everyone can create a job (a manager/sub-admin makes a team job; a normal
+  // user makes a personal one). The admin tier also sees every team job.
   const isManager = (user?.org_role || "manager") === "manager";
+  const caps = user?.admin_permissions || [];
+  // Pause/reactivate is owner-or-manager; close is additionally available to a
+  // Sub-Admin with `delete_jobs` on a team job — mirrors the server rules so the
+  // UI never offers an action the backend rejects.
+  const canPause = (j) => j.status !== "closed" && (isManager || j.created_by === user?.id);
+  const canClose = (j) =>
+    j.status !== "closed" &&
+    (isManager || j.created_by === user?.id || (j.origin !== "personal" && caps.includes("delete_jobs")));
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -146,18 +154,24 @@ export default function Jobs() {
                   <span className="flex items-center gap-1.5"><Users size={14} /> {j.candidate_count} candidates</span>
                   <span className="flex items-center gap-1.5"><Calendar size={14} /> {fmtDate(j.created_at)}</span>
                 </div>
+                {/* Who created the job — from the persisted creator (§6). */}
+                {j.created_by_name && (
+                  <div className="mt-2 text-xs text-gray-400 flex items-center gap-1.5" data-testid={`job-creator-${j.id}`}>
+                    <UserRound size={12} /> Created by {j.created_by_name}
+                  </div>
+                )}
 
                 <div className="flex gap-2 mt-4">
                   <Button variant="secondary" className="flex-1" onClick={(e) => { e.stopPropagation(); navigate(`/jobs/${j.id}`); }} data-testid={`job-view-${j.id}`}><Eye size={14} /> View</Button>
-                  {(isManager || j.origin === "personal") && j.status !== "closed" && (
-                    <>
-                      <Button variant="ghost" onClick={(e) => toggleStatus(e, j)} title={j.status === "active" ? "Pause job" : "Reactivate job"} data-testid={`job-toggle-${j.id}`}>
-                        {j.status === "active" ? <Pause size={14} /> : <Play size={14} />}
-                      </Button>
-                      <Button variant="ghost" onClick={(e) => closeJob(e, j)} title="Close job" data-testid={`job-close-${j.id}`}>
-                        <Ban size={14} className="text-coral" />
-                      </Button>
-                    </>
+                  {canPause(j) && (
+                    <Button variant="ghost" onClick={(e) => toggleStatus(e, j)} title={j.status === "active" ? "Pause job" : "Reactivate job"} data-testid={`job-toggle-${j.id}`}>
+                      {j.status === "active" ? <Pause size={14} /> : <Play size={14} />}
+                    </Button>
+                  )}
+                  {canClose(j) && (
+                    <Button variant="ghost" onClick={(e) => closeJob(e, j)} title="Close job" data-testid={`job-close-${j.id}`}>
+                      <Ban size={14} className="text-coral" />
+                    </Button>
                   )}
                 </div>
               </Card>

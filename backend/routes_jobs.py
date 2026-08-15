@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
-from database import jobs, candidates, stage_transitions, job_assignments, job_jd_overrides, activity_events
+from database import jobs, candidates, stage_transitions, job_assignments, job_jd_overrides, activity_events, users
 from auth import get_current_user
 from models import JobCreate, JobUpdate
 import permissions
@@ -69,19 +69,42 @@ async def _job_stats(job: dict) -> dict:
     return _apply_counts(job, await _counts_for_jobs([job["id"]]))
 
 
+def _creator_id(job: dict):
+    """The id of whoever created the job. Older records (pre-Cycle 2) may only have
+    `user_id`; fall back to it so historical jobs still attribute correctly."""
+    return job.get("created_by") or job.get("user_id")
+
+
+async def _attach_creator_names(job_docs: list) -> list:
+    """Attach `created_by_name` to each job in one query, so every job list shows
+    who created it (§6). Jobs with no resolvable creator (missing/legacy) get None,
+    which the UI renders as '—' rather than inventing an attribution."""
+    ids = {cid for j in job_docs if (cid := _creator_id(j))}
+    names: dict = {}
+    if ids:
+        async for u in users.find({"id": {"$in": list(ids)}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
+            names[u["id"]] = u.get("name") or u.get("email")
+    for j in job_docs:
+        j["created_by_name"] = names.get(_creator_id(j))
+    return job_docs
+
+
 @router.get("")
 async def list_jobs(user: dict = Depends(permissions.require_org_member)):
     """List postings with candidate counts, scoped to the caller.
 
-    Manager → every org job + their own personal jobs. Recruiter → jobs they have
-    an active assignment on + their own personal jobs. Personal jobs never leak.
+    Manager **or Sub-Admin** → every team job (created by any admin/sub-admin) +
+    their own personal jobs. Recruiter → jobs they have an active assignment on +
+    their own personal jobs. Personal jobs never leak; a normal user never sees the
+    whole org's jobs. Every row carries `created_by_name` (§6).
     """
     org_id = user["org_id"]
     is_mgr = permissions.is_manager(user)
-    query = await permissions.visible_jobs_query(user)
+    query = await permissions.team_visible_jobs_query(user)
     docs = await jobs.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     counts = await _counts_for_jobs([d["id"] for d in docs])
     result = [_apply_counts(d, counts) for d in docs]
+    await _attach_creator_names(result)
 
     # For a recruiter, attach their own assignment's deadline/targets so the job
     # card can show them (managers see all org jobs and have no assignment).
@@ -111,9 +134,11 @@ async def create_job(body: JobCreate, user: dict = Depends(permissions.require_o
         raise HTTPException(status_code=400, detail="Openings must be at least 1")
 
     now = datetime.now(timezone.utc).isoformat()
-    # A manager, or a sub-admin granted `post_jobs`, creates an org job; any other
-    # recruiter creates a personal job (visible only to them).
-    origin = "org" if permissions.has_capability(user, "post_jobs") else "personal"
+    # An admin (manager) or a Sub-Admin creates a **team** job (visible to the whole
+    # admin tier + assigned recruiters); a normal user creates a **personal** job
+    # (visible only to them). Being a Sub-Admin — of any capability — is what makes
+    # a created job a team job (§5); there is no separate "post jobs" permission.
+    origin = "org" if permissions.sees_all_org_jobs(user) else "personal"
     job = {
         "id": str(uuid.uuid4()),
         "org_id": user["org_id"],
@@ -153,6 +178,11 @@ async def get_job(job_id: str, user: dict = Depends(get_current_user)):
     job["jd_source"] = jd["jd_source"]
     job["effective_permissions"] = access.permissions
     job["access_scope"] = access.scope
+    # Server-computed capability flags so the UI reflects exactly what the backend
+    # will allow (never frontend-only): whether the caller may assign this job and
+    # whether they may close/delete it.
+    job["can_assign"] = permissions.can_assign_job(user, access)
+    job["can_close_or_delete"] = permissions.can_close_or_delete_job(user, access)
     # Notice for a recruiter whose personal JD override predates the admin's last
     # edit of the shared JD — "the admin updated the job description" (§12).
     job["jd_org_updated"] = False
@@ -163,6 +193,7 @@ async def get_job(job_id: str, user: dict = Depends(get_current_user)):
         jd_updated_at = access.job.get("jd_updated_at")
         if ov and jd_updated_at and ov.get("updated_at") and ov["updated_at"] < jd_updated_at:
             job["jd_org_updated"] = True
+    await _attach_creator_names([job])
     return await _job_stats(job)
 
 
@@ -172,15 +203,20 @@ VALID_STATUSES = ("active", "paused", "closed")
 @router.put("/{job_id}")
 async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_current_user)):
     access = await permissions.resolve_job_access(user, job_id)
-    # A manager edits org jobs; a recruiter edits only their own personal job.
-    if access.scope not in ("manager", "owner"):
-        raise HTTPException(status_code=403, detail="Only an admin can edit this job.")
     job = access.job
 
     # `exclude_unset` rather than dropping falsy values: the old filter meant a
     # field could never be cleared back to empty, because "" and None both
     # looked like "not supplied".
     updates = body.model_dump(exclude_unset=True)
+
+    # A manager, or the job's own creator, may fully edit it. Otherwise the only
+    # permitted change is **closing** a team job, and only for a Sub-Admin holding
+    # `delete_jobs` (the "Close & delete jobs" capability) — no meta edits leak in.
+    if access.scope not in ("manager", "owner"):
+        only_close = set(updates.keys()) <= {"status"} and updates.get("status") == "closed"
+        if not (only_close and permissions.can_close_or_delete_job(user, access)):
+            raise HTTPException(status_code=403, detail="Only an admin can edit this job.")
     if "status" in updates and updates["status"] not in VALID_STATUSES:
         raise HTTPException(
             status_code=400,
@@ -211,18 +247,13 @@ async def update_job(job_id: str, body: JobUpdate, user: dict = Depends(get_curr
 
 @router.delete("/{job_id}")
 async def delete_job(job_id: str, user: dict = Depends(get_current_user)):
-    # A manager, or a sub-admin granted `delete_jobs`, may delete any ORG job;
-    # a recruiter may delete only their own personal job.
-    if permissions.has_capability(user, "delete_jobs"):
-        job = await jobs.find_one({"id": job_id, "org_id": user["org_id"], "origin": {"$ne": "personal"}}, {"_id": 0})
-        if job is None:
-            access = await permissions.resolve_job_access(user, job_id)  # own personal job path
-            if access.scope not in ("manager", "owner"):
-                raise HTTPException(status_code=403, detail="Only an admin can delete this job.")
-    else:
-        access = await permissions.resolve_job_access(user, job_id)
-        if access.scope not in ("manager", "owner"):
-            raise HTTPException(status_code=403, detail="Only an admin can delete this job.")
+    # Resolve access first (404 if the caller can't even see the job — sub-admins
+    # can see every team job, recruiters only assigned ones). Then gate on the
+    # close/delete rule: owner/manager always; a Sub-Admin with `delete_jobs` may
+    # delete any team job; a normal user only their own personal job.
+    access = await permissions.resolve_job_access(user, job_id)
+    if not permissions.can_close_or_delete_job(user, access):
+        raise HTTPException(status_code=403, detail="Only an admin can delete this job.")
     cand_ids = [c["id"] async for c in candidates.find({"job_id": job_id}, {"id": 1})]
     if cand_ids:
         await stage_transitions.delete_many({"candidate_id": {"$in": cand_ids}})

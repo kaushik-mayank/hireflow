@@ -192,10 +192,13 @@ export default function JobDetail() {
   const isAssigned = job.access_scope === "assigned";
   const canEditMyJd = isAssigned && Boolean(job.effective_permissions?.can_edit_jd);
   const isPersonalJd = job.jd_source === "personal";
+  // Server-computed: whether this caller may assign this job (manager, or a
+  // Sub-Admin with assign_jobs on a team job). The Team/assignment tab follows it.
+  const canAssign = Boolean(job.can_assign);
   const tabs = [
     ["candidates", "Candidates", null],
     ["jd", "JD Preview", FileText],
-    ...(isManager ? [["team", "Team", Users]] : []),
+    ...(canAssign ? [["team", "Team", Users]] : []),
     ["activity", "Activity", Activity],
   ];
 
@@ -223,6 +226,8 @@ export default function JobDetail() {
     job.department || "No dept",
     `${job.openings_needed} opening(s)`,
     `${job.hired_count}/${job.openings_needed} hired`,
+    // Who created this job — from the persisted creator, not the viewer/assignee (§6).
+    job.created_by_name ? `Created by ${job.created_by_name}` : null,
   ].filter(Boolean);
 
   return (
@@ -439,7 +444,7 @@ export default function JobDetail() {
           </Card>
         )}
 
-        {tab === "team" && isManager && <AssignmentPanel jobId={id} />}
+        {tab === "team" && canAssign && <AssignmentPanel jobId={id} />}
 
         {tab === "activity" && (
           <Card className="p-2">

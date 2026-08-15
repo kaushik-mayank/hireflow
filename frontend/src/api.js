@@ -71,6 +71,9 @@ export const assignmentsApi = {
   bulkUpsert: (jobId, data) => client.post(`/jobs/${jobId}/assignments/bulk`, data),
   revoke: (jobId, userId) => client.delete(`/jobs/${jobId}/assignments/${userId}`),
   mine: () => client.get("/assignments/mine"),
+  // Recruiter roster for the assignment picker — gated by `assign_jobs` (not
+  // team management), so an assign-only Sub-Admin can still assign jobs.
+  recruiters: () => client.get("/assignments/recruiters"),
   setJdOverride: (jobId, data) => client.put(`/jobs/${jobId}/jd-override`, data),
   clearJdOverride: (jobId) => client.delete(`/jobs/${jobId}/jd-override`),
 };

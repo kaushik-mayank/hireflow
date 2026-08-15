@@ -19,9 +19,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def _matches(doc, query):
     for k, v in query.items():
         if isinstance(v, dict):
+            # `_manager_job_or_404` now filters `origin: {"$ne": "personal"}`, so the
+            # fake matcher must understand $ne (and keep supporting $in).
             if "$in" in v and doc.get(k) not in v["$in"]:
                 return False
-            if not ("$in" in v) and doc.get(k) != v:
+            if "$ne" in v and doc.get(k) == v["$ne"]:
+                return False
+            if not ("$in" in v or "$ne" in v) and doc.get(k) != v:
                 return False
         elif doc.get(k) != v:
             return False

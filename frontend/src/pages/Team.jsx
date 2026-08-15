@@ -226,10 +226,13 @@ function PermissionsModal({ target, onClose, onDone }) {
                 }`}
                 data-testid={`perm-${cap.id}`}
               >
-                <span className={`grid place-items-center w-4 h-4 rounded border ${on ? "bg-indigo border-indigo" : "border-gray-300"}`}>
+                <span className={`grid place-items-center w-4 h-4 rounded border shrink-0 mt-0.5 ${on ? "bg-indigo border-indigo" : "border-gray-300"}`}>
                   {on && <ShieldCheck size={11} className="text-white" />}
                 </span>
-                <span className="text-sm font-medium text-gray-800">{cap.label}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-gray-800">{cap.label}</span>
+                  {cap.description && <span className="block text-xs text-gray-500 mt-0.5">{cap.description}</span>}
+                </span>
               </button>
             );
           })}
